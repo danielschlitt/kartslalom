@@ -8,6 +8,9 @@ import type {
 } from "@/lib/ranking";
 import type { EnrichedEntry } from "@/lib/dal/races";
 
+const HOME_TEAM = "OAMC Reinheim";
+const HOME_TEAM_BG = "#082e3f";
+
 export function StandingsTable({
   ageClassName,
   ranked,
@@ -70,6 +73,7 @@ export function StandingsTable({
                 const e = r.entry;
                 const hl = highlights.get(e.entryId);
                 const isExtra = e.driverType !== "championship";
+                const isHome = e.teamName === HOME_TEAM;
                 const bestTotal = bestTotalFor(e);
                 return (
                   <tr
@@ -78,6 +82,7 @@ export function StandingsTable({
                       "border-b border-[var(--color-border)]/50 last:border-0",
                       r.isPending && "opacity-60",
                     )}
+                    style={isHome ? { backgroundColor: HOME_TEAM_BG } : undefined}
                   >
                     <td className="px-3 py-1.5">
                       {r.finishPosition ? (

@@ -1,8 +1,14 @@
 import { ChampionshipTable } from "@/components/championship-table";
-import { FilterBar, parseViewMode } from "@/components/filter-bar";
+import { seriesSubtitle } from "@/components/championship-subtitle";
+import {
+  FilterBar,
+  parseApplyDrops,
+  parseViewMode,
+} from "@/components/filter-bar";
 import { SeriesTabs, type SeriesParam } from "@/components/series-tabs";
 import {
   getChampionshipDriversWithView,
+  getCompletedRaceNumbers,
   seriesRaceNumbers,
 } from "@/lib/dal/races";
 import { computeChampionship } from "@/lib/ranking";
@@ -12,17 +18,28 @@ export const dynamic = "force-dynamic";
 export default async function ChampionshipPage({
   searchParams,
 }: {
-  searchParams: Promise<{ series?: string; metric?: string; penalty?: string }>;
+  searchParams: Promise<{
+    series?: string;
+    metric?: string;
+    penalty?: string;
+    drops?: string;
+  }>;
 }) {
   const sp = await searchParams;
   const series: SeriesParam = sp.series === "hmj" ? "hmj" : "hts";
   const view = parseViewMode(sp);
+  const applyDrops = parseApplyDrops(sp);
   const raceNumbers = seriesRaceNumbers(series);
 
-  const drivers = await getChampionshipDriversWithView(view);
+  const [drivers, completedRaceNumbers] = await Promise.all([
+    getChampionshipDriversWithView(view),
+    getCompletedRaceNumbers(),
+  ]);
   const rows = computeChampionship(drivers, {
     series,
     seriesRaceNumbers: raceNumbers,
+    completedRaceNumbers,
+    applyDrops,
   });
 
   const byClass = new Map<number, { name: string; rows: typeof rows }>();
@@ -41,29 +58,43 @@ export default async function ChampionshipPage({
         <div>
           <h1 className="text-2xl font-semibold">Meisterschaftsstand</h1>
           <p className="text-sm text-[var(--color-muted)]">
-            {series === "hts"
-              ? "Hessen-Thüringen Süd · 8 Rennen · 2 Streichresultate"
-              : "HMJ · 5 Rennen · 1 Streichresultat"}
+            {seriesSubtitle(series, applyDrops)}
           </p>
         </div>
         <SeriesTabs
           active={series}
           basePath="/championship"
-          searchParams={{ metric: sp.metric, penalty: sp.penalty }}
+          searchParams={{
+            metric: sp.metric,
+            penalty: sp.penalty,
+            drops: sp.drops,
+          }}
         />
       </div>
 
       <FilterBar
         basePath="/championship"
-        searchParams={{ series, metric: sp.metric, penalty: sp.penalty }}
+        searchParams={{
+          series,
+          metric: sp.metric,
+          penalty: sp.penalty,
+          drops: sp.drops,
+        }}
         metric={view.metric}
         penaltyMode={view.penaltyMode}
+        applyDrops={applyDrops}
       />
 
       <p className="text-xs text-[var(--color-muted)]">
-        Streichresultate sind <span className="line-through">durchgestrichen</span>.
-        Virtuelle Wertungen werden für Rennen mit erfassten Laufzeiten neu
-        berechnet — Rennen ohne Zeiten behalten ihre offiziellen Punkte.
+        {applyDrops ? (
+          <>
+            Streichresultate sind{" "}
+            <span className="line-through">durchgestrichen</span>. Nur beendete
+            Rennen werden für Streichergebnisse herangezogen.
+          </>
+        ) : (
+          <>Streichergebnisse sind ausgeschaltet — alle Rennen zählen voll.</>
+        )}
       </p>
 
       <div className="space-y-6">
@@ -84,3 +115,4 @@ export default async function ChampionshipPage({
     </div>
   );
 }
+

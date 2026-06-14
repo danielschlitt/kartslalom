@@ -15,6 +15,11 @@ const PENALTIES: { value: PenaltyMode; label: string }[] = [
   { value: "only", label: "nur Strafsek." },
 ];
 
+const DROPS: { value: "on" | "off"; label: string }[] = [
+  { value: "on", label: "an" },
+  { value: "off", label: "aus" },
+];
+
 /**
  * Virtual-view selector that survives via search params. Used on the
  * championship pages to recompute points across events that have run
@@ -26,21 +31,32 @@ export function FilterBar({
   searchParams,
   metric,
   penaltyMode,
+  applyDrops,
 }: {
   basePath: string;
   searchParams: Record<string, string | undefined>;
   metric: Metric;
   penaltyMode: PenaltyMode;
+  applyDrops: boolean;
 }) {
-  const buildHref = (next: Partial<{ metric: Metric; penalty: PenaltyMode }>) => {
+  const buildHref = (
+    next: Partial<{
+      metric: Metric;
+      penalty: PenaltyMode;
+      drops: "on" | "off";
+    }>,
+  ) => {
     const sp = new URLSearchParams();
     for (const [k, v] of Object.entries(searchParams)) {
       if (v) sp.set(k, v);
     }
     if (next.metric) sp.set("metric", next.metric);
     if (next.penalty) sp.set("penalty", next.penalty);
+    if (next.drops) sp.set("drops", next.drops);
     return `${basePath}?${sp.toString()}`;
   };
+
+  const drops: "on" | "off" = applyDrops ? "on" : "off";
 
   return (
     <div className="flex flex-wrap items-center gap-3 rounded-lg border border-[var(--color-border)] bg-[var(--color-surface)] p-3">
@@ -83,6 +99,26 @@ export function FilterBar({
           </Link>
         ))}
       </div>
+      <div className="h-4 w-px bg-[var(--color-border)]" />
+      <div className="flex flex-wrap items-center gap-1">
+        <span className="px-1 text-xs tracking-wider text-[var(--color-muted)] uppercase">
+          Streich.
+        </span>
+        {DROPS.map((d) => (
+          <Link
+            key={d.value}
+            href={buildHref({ drops: d.value })}
+            className={cn(
+              "rounded-md px-2.5 py-1 text-xs",
+              drops === d.value
+                ? "bg-[var(--color-accent)] text-[var(--color-accent-foreground)]"
+                : "text-[var(--color-muted)] hover:text-[var(--color-foreground)]",
+            )}
+          >
+            {d.label}
+          </Link>
+        ))}
+      </div>
     </div>
   );
 }
@@ -102,4 +138,9 @@ export function parseViewMode(searchParams: {
       ? searchParams.penalty
       : "with";
   return { metric, penaltyMode };
+}
+
+/** Default ON unless URL explicitly opts out via `?drops=off`. */
+export function parseApplyDrops(searchParams: { drops?: string }): boolean {
+  return searchParams.drops !== "off";
 }

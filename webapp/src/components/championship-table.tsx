@@ -2,6 +2,10 @@ import type { ChampionshipRow } from "@/lib/ranking";
 import { RankBadge } from "@/components/rank-badge";
 import { cn } from "@/lib/utils";
 
+/** Local team — its drivers get a tinted row to stand out. */
+const HOME_TEAM = "OAMC Reinheim";
+const HOME_TEAM_BG = "#082e3f";
+
 export function ChampionshipTable({
   rows,
   raceNumbers,
@@ -49,10 +53,13 @@ export function ChampionshipTable({
                 </td>
               </tr>
             ) : (
-              rows.map((r) => (
+              rows.map((r) => {
+                const isHome = r.teamName === HOME_TEAM;
+                return (
                 <tr
                   key={r.driverId}
                   className="border-b border-[var(--color-border)]/50 last:border-0"
+                  style={isHome ? { backgroundColor: HOME_TEAM_BG } : undefined}
                 >
                   <td className="px-3 py-2">
                     <RankBadge rank={r.rank} />
@@ -91,7 +98,8 @@ export function ChampionshipTable({
                     {r.totalPoints}
                   </td>
                 </tr>
-              ))
+                );
+              })
             )}
           </tbody>
         </table>

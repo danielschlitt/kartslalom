@@ -27,6 +27,24 @@ export async function getAllAgeClasses() {
   return db.select().from(ageClasses).orderBy(asc(ageClasses.sortOrder));
 }
 
+/**
+ * Age classes that currently have at least one championship driver assigned.
+ * Used to render the per-class championship cards on the home page so we
+ * don't surface empty Altersklassen.
+ */
+export async function getActiveAgeClasses() {
+  const rows = await db
+    .selectDistinct({
+      id: ageClasses.id,
+      name: ageClasses.name,
+      sortOrder: ageClasses.sortOrder,
+    })
+    .from(ageClasses)
+    .innerJoin(drivers, eq(drivers.ageClassId, ageClasses.id))
+    .orderBy(asc(ageClasses.sortOrder));
+  return rows;
+}
+
 export async function getAllRaceEvents() {
   return db
     .select({
@@ -153,6 +171,17 @@ export const HMJ_RACES = [1, 3, 5, 7, 8];
 
 export function seriesRaceNumbers(series: Series): number[] {
   return series === "hts" ? HTS_RACES : HMJ_RACES;
+}
+
+/**
+ * Race numbers whose event is `completed` — only these may be used as
+ * Streichergebnisse in the championship aggregation.
+ */
+export async function getCompletedRaceNumbers(): Promise<number[]> {
+  const rows = await db
+    .select({ number: raceEvents.number, status: raceEvents.status })
+    .from(raceEvents);
+  return rows.filter((r) => r.status === "completed").map((r) => r.number);
 }
 
 /**

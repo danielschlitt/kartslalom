@@ -1,5 +1,7 @@
 import Link from "next/link";
-import { Zap } from "lucide-react";
+import { ArrowLeft } from "lucide-react";
+import { notFound } from "next/navigation";
+
 import { ChampionshipTable } from "@/components/championship-table";
 import { seriesSubtitle } from "@/components/championship-subtitle";
 import {
@@ -9,7 +11,7 @@ import {
 } from "@/components/filter-bar";
 import { SeriesTabs, type SeriesParam } from "@/components/series-tabs";
 import {
-  getAllRaceEvents,
+  getAllAgeClasses,
   getChampionshipDriversWithView,
   getCompletedRaceNumbers,
   seriesRaceNumbers,
@@ -18,9 +20,11 @@ import { computeChampionship } from "@/lib/ranking";
 
 export const dynamic = "force-dynamic";
 
-export default async function LiveChampionshipPage({
+export default async function ChampionshipClassPage({
+  params,
   searchParams,
 }: {
+  params: Promise<{ id: string }>;
   searchParams: Promise<{
     series?: string;
     metric?: string;
@@ -28,49 +32,57 @@ export default async function LiveChampionshipPage({
     drops?: string;
   }>;
 }) {
+  const { id } = await params;
+  const classId = Number(id);
+  if (!Number.isFinite(classId)) notFound();
+
   const sp = await searchParams;
   const series: SeriesParam = sp.series === "hmj" ? "hmj" : "hts";
   const view = parseViewMode(sp);
   const applyDrops = parseApplyDrops(sp);
   const raceNumbers = seriesRaceNumbers(series);
+  const basePath = `/championship/class/${classId}`;
 
-  const [drivers, allEvents, completedRaceNumbers] = await Promise.all([
+  const [allClasses, drivers, completedRaceNumbers] = await Promise.all([
+    getAllAgeClasses(),
     getChampionshipDriversWithView(view),
-    getAllRaceEvents(),
     getCompletedRaceNumbers(),
   ]);
 
-  const liveEvent = allEvents.find((e) => e.status === "live");
+  const ageClass = allClasses.find((c) => c.id === classId);
+  if (!ageClass) notFound();
+
   const rows = computeChampionship(drivers, {
     series,
     seriesRaceNumbers: raceNumbers,
     completedRaceNumbers,
     applyDrops,
-  });
-
-  const byClass = new Map<number, { name: string; rows: typeof rows }>();
-  for (const r of rows) {
-    let group = byClass.get(r.ageClassId);
-    if (!group) {
-      group = { name: r.ageClassName, rows: [] };
-      byClass.set(r.ageClassId, group);
-    }
-    group.rows.push(r);
-  }
+  }).filter((r) => r.ageClassId === classId);
 
   return (
     <div className="space-y-6">
+      <div>
+        <Link
+          href="/championship"
+          className="inline-flex items-center gap-1.5 text-xs text-[var(--color-muted)] hover:text-[var(--color-foreground)]"
+        >
+          <ArrowLeft className="h-3.5 w-3.5" />
+          Alle Klassen
+        </Link>
+      </div>
+
       <div className="flex flex-wrap items-center justify-between gap-3">
         <div>
-          <h1 className="text-2xl font-semibold">Live-Meisterschaft</h1>
+          <h1 className="text-2xl font-semibold">
+            Meisterschaft {ageClass.name}
+          </h1>
           <p className="text-sm text-[var(--color-muted)]">
             {seriesSubtitle(series, applyDrops)}
-            {liveEvent ? ` · Inkl. ${liveEvent.name}` : ""}
           </p>
         </div>
         <SeriesTabs
           active={series}
-          basePath="/championship/live"
+          basePath={basePath}
           searchParams={{
             metric: sp.metric,
             penalty: sp.penalty,
@@ -80,7 +92,7 @@ export default async function LiveChampionshipPage({
       </div>
 
       <FilterBar
-        basePath="/championship/live"
+        basePath={basePath}
         searchParams={{
           series,
           metric: sp.metric,
@@ -92,31 +104,22 @@ export default async function LiveChampionshipPage({
         applyDrops={applyDrops}
       />
 
-      {liveEvent && (
-        <Link
-          href={`/events/${liveEvent.id}`}
-          className="inline-flex items-center gap-2 rounded-md border border-[var(--color-live)]/40 bg-[var(--color-live)]/10 px-3 py-2 text-sm text-[var(--color-live)] hover:bg-[var(--color-live)]/15"
-        >
-          <Zap className="h-4 w-4 animate-pulse" />
-          Live: {liveEvent.name} öffnen →
-        </Link>
-      )}
+      <p className="text-xs text-[var(--color-muted)]">
+        {applyDrops ? (
+          <>
+            Streichresultate sind{" "}
+            <span className="line-through">durchgestrichen</span>. Nur beendete
+            Rennen werden für Streichergebnisse herangezogen.
+          </>
+        ) : (
+          <>Streichergebnisse sind ausgeschaltet — alle Rennen zählen voll.</>
+        )}
+      </p>
 
-      <div className="space-y-6">
-        {[...byClass.values()].map((g) => (
-          <ChampionshipTable
-            key={g.name}
-            ageClassName={g.name}
-            rows={g.rows}
-            raceNumbers={raceNumbers}
-          />
-        ))}
-      </div>
-
-      <script
-        dangerouslySetInnerHTML={{
-          __html: `setTimeout(() => location.reload(), 5000);`,
-        }}
+      <ChampionshipTable
+        ageClassName={ageClass.name}
+        rows={rows}
+        raceNumbers={raceNumbers}
       />
     </div>
   );

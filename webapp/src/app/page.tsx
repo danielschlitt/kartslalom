@@ -1,12 +1,15 @@
 import Link from "next/link";
-import { Calendar, Flag, Trophy, Zap } from "lucide-react";
-import { getAllRaceEvents } from "@/lib/dal/races";
+import { Calendar, Flag, Medal, Trophy, Zap } from "lucide-react";
+import { getActiveAgeClasses, getAllRaceEvents } from "@/lib/dal/races";
 import { cn, formatDateDe } from "@/lib/utils";
 
 export const dynamic = "force-dynamic";
 
 export default async function HomePage() {
-  const events = await getAllRaceEvents();
+  const [events, ageClasses] = await Promise.all([
+    getAllRaceEvents(),
+    getActiveAgeClasses(),
+  ]);
 
   return (
     <div className="space-y-6">
@@ -44,6 +47,33 @@ export default async function HomePage() {
           hint="CSV-Backfill"
         />
       </div>
+
+      {ageClasses.length > 0 && (
+        <section>
+          <h2 className="mb-3 text-sm font-semibold tracking-wider text-[var(--color-muted)] uppercase">
+            Meisterschaft pro Altersklasse
+          </h2>
+          <div className="grid grid-cols-2 gap-3 sm:grid-cols-3 lg:grid-cols-4">
+            {ageClasses.map((c) => (
+              <Link
+                key={c.id}
+                href={`/championship/class/${c.id}`}
+                className="flex items-center gap-3 rounded-lg border border-[var(--color-border)] bg-[var(--color-surface)] p-3 transition-colors hover:bg-[var(--color-surface-2)]"
+              >
+                <span className="rounded-md bg-[var(--color-surface-2)] p-2 text-[var(--color-muted)]">
+                  <Medal className="h-4 w-4" />
+                </span>
+                <span className="flex flex-col">
+                  <span className="text-xs text-[var(--color-muted)]">
+                    Meisterschaft
+                  </span>
+                  <span className="text-sm font-semibold">{c.name}</span>
+                </span>
+              </Link>
+            ))}
+          </div>
+        </section>
+      )}
 
       <section>
         <h2 className="mb-3 text-sm font-semibold tracking-wider text-[var(--color-muted)] uppercase">

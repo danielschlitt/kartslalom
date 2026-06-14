@@ -292,6 +292,17 @@ export interface ChampionshipOptions {
   series: Series;
   /** Race numbers belonging to the series (used to scope perRace + drops). */
   seriesRaceNumbers: number[];
+  /**
+   * Race numbers that are eligible for "Streichergebnis" (drop). Only races
+   * whose event is `completed` should be passed here — upcoming/live races
+   * cannot be dropped because they have not happened yet.
+   */
+  completedRaceNumbers: readonly number[];
+  /**
+   * When `false`, no Streichergebnisse are applied — every race counts and
+   * `totalPoints` sums all per-race points. Defaults to `true`.
+   */
+  applyDrops?: boolean;
 }
 
 const DROP_COUNT: Record<Series, number> = { hts: 2, hmj: 1 };
@@ -300,6 +311,9 @@ const DROP_COUNT: Record<Series, number> = { hts: 2, hmj: 1 };
  * Aggregate per-driver race results into a championship table with shared
  * ranks (ties keep the same rank, the next rank is offset by the tie size).
  *
+ * Ranks are computed **per age class** — each Altersklasse has its own
+ * championship, so #1 in Altersklasse I and #1 in Altersklasse II coexist.
+ *
  * Vorstarter and Gaststarter never accrue championship points and are
  * filtered out.
  */
@@ -307,8 +321,10 @@ export function computeChampionship(
   drivers: readonly DriverChampionshipInput[],
   options: ChampionshipOptions,
 ): ChampionshipRow[] {
-  const { seriesRaceNumbers } = options;
-  const dropCount = DROP_COUNT[options.series];
+  const { seriesRaceNumbers, completedRaceNumbers } = options;
+  const applyDrops = options.applyDrops !== false;
+  const dropCount = applyDrops ? DROP_COUNT[options.series] : 0;
+  const completedSet = new Set(completedRaceNumbers);
 
   const rows: ChampionshipRow[] = drivers
     .filter((d) => d.driverType === "championship")
@@ -327,7 +343,8 @@ export function computeChampionship(
         0,
       );
 
-      const dropped = pickDroppedRaces(seriesRaceNumbers, perRace, dropCount);
+      const droppable = seriesRaceNumbers.filter((n) => completedSet.has(n));
+      const dropped = pickDroppedRaces(droppable, perRace, dropCount);
       const totalPoints = seriesRaceNumbers.reduce((sum, num) => {
         if (dropped.includes(num)) return sum;
         return sum + (perRace[num] ?? 0);
@@ -350,45 +367,56 @@ export function computeChampionship(
       };
     });
 
-  // Sort by total points desc, then started races desc, then last name as tie-break.
-  rows.sort((a, b) => {
-    if (b.totalPoints !== a.totalPoints) return b.totalPoints - a.totalPoints;
-    if (b.startedRaces !== a.startedRaces)
-      return b.startedRaces - a.startedRaces;
-    return a.lastName.localeCompare(b.lastName);
-  });
-
-  // Shared ranks: ties get the same rank; next rank skips the tie size.
-  let i = 0;
-  while (i < rows.length) {
-    let j = i + 1;
-    while (
-      j < rows.length &&
-      rows[j].totalPoints === rows[i].totalPoints &&
-      rows[j].startedRaces === rows[i].startedRaces
-    ) {
-      j += 1;
-    }
-    for (let k = i; k < j; k++) rows[k].rank = i + 1;
-    i = j;
+  // Bucket by age class, sort + rank within each class, then concatenate.
+  const byClass = new Map<number, ChampionshipRow[]>();
+  for (const row of rows) {
+    const arr = byClass.get(row.ageClassId) ?? [];
+    arr.push(row);
+    byClass.set(row.ageClassId, arr);
   }
 
-  return rows;
+  const result: ChampionshipRow[] = [];
+  for (const classRows of byClass.values()) {
+    classRows.sort((a, b) => {
+      if (b.totalPoints !== a.totalPoints) return b.totalPoints - a.totalPoints;
+      if (b.startedRaces !== a.startedRaces)
+        return b.startedRaces - a.startedRaces;
+      return a.lastName.localeCompare(b.lastName);
+    });
+
+    // Shared ranks within the class: ties get the same rank, the next rank
+    // skips the tie size (1, 2, 3, 3, 5).
+    let i = 0;
+    while (i < classRows.length) {
+      let j = i + 1;
+      while (
+        j < classRows.length &&
+        classRows[j].totalPoints === classRows[i].totalPoints &&
+        classRows[j].startedRaces === classRows[i].startedRaces
+      ) {
+        j += 1;
+      }
+      for (let k = i; k < j; k++) classRows[k].rank = i + 1;
+      i = j;
+    }
+    result.push(...classRows);
+  }
+
+  return result;
 }
 
 /**
- * Drop the lowest-scoring `dropCount` races for a single driver.
- * Ties at the threshold prefer the higher race number so the latest
- * (and typically most recent) bad result is dropped first — matches the
- * intuitive UI behaviour without affecting totals.
+ * Drop the lowest-scoring `dropCount` races for a single driver from the
+ * given pool of droppable race numbers. Ties at the threshold prefer the
+ * higher race number so the latest bad result is the one struck.
  */
 function pickDroppedRaces(
-  raceNumbers: number[],
+  droppable: number[],
   perRace: Record<number, number>,
   dropCount: number,
 ): number[] {
-  if (dropCount <= 0) return [];
-  const ordered = [...raceNumbers].sort((a, b) => {
+  if (dropCount <= 0 || droppable.length === 0) return [];
+  const ordered = [...droppable].sort((a, b) => {
     const pa = perRace[a] ?? 0;
     const pb = perRace[b] ?? 0;
     if (pa !== pb) return pa - pb;
