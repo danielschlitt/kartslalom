@@ -254,9 +254,14 @@ export async function getChampionshipDriversWithView(
     );
     if (!hasAnyTime) continue;
 
+    // Only finalized age classes have an official result; provisional run
+    // times for non-finalized classes must never seep into the championship.
+    const finalizedAgeClassIds = await getFinalizedAgeClassIds(event.id);
+
     // Group by age class so ranking and points stay class-scoped.
     const byClass = new Map<number, EnrichedEntry[]>();
     for (const e of entries) {
+      if (!finalizedAgeClassIds.has(e.ageClassId)) continue;
       const arr = byClass.get(e.ageClassId) ?? [];
       arr.push(e);
       byClass.set(e.ageClassId, arr);

@@ -1,7 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { and, eq } from "drizzle-orm";
 import { db } from "@/db/drizzle";
-import { raceEntries, runs } from "@/db/schema";
+import { eventAgeClassFinalizations, raceEntries, runs } from "@/db/schema";
 
 const VALID_RUN_TYPES = ["test", "first", "second"] as const;
 type RunType = (typeof VALID_RUN_TYPES)[number];
@@ -27,6 +27,25 @@ export async function POST(
     .limit(1);
   if (entry.length === 0)
     return NextResponse.json({ error: "not_found" }, { status: 404 });
+
+  // Once the age class is finalized, run times become read-only so the
+  // official championship result cannot drift from later edits.
+  const [finalized] = await db
+    .select({ id: eventAgeClassFinalizations.id })
+    .from(eventAgeClassFinalizations)
+    .where(
+      and(
+        eq(eventAgeClassFinalizations.raceEventId, entry[0].raceEventId),
+        eq(eventAgeClassFinalizations.ageClassId, entry[0].ageClassId),
+      ),
+    )
+    .limit(1);
+  if (finalized) {
+    return NextResponse.json(
+      { error: "age_class_finalized" },
+      { status: 409 },
+    );
+  }
 
   const body = await req.json().catch(() => ({}));
   const runType = body?.runType as RunType;

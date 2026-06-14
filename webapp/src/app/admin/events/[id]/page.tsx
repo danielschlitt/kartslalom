@@ -73,6 +73,7 @@ export default async function AdminEventPage({
           teamName: e.teamName,
           startingOrder: e.startingOrder,
           driverType: e.driverType,
+          storedFinishPosition: e.storedFinishPosition ?? null,
           runs: {
             test: e.runs.test,
             first: e.runs.first,

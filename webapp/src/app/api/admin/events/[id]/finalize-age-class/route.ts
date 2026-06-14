@@ -10,7 +10,34 @@ import {
   getEnrichedEntriesForEvent,
   getPointsScale,
 } from "@/lib/dal/races";
-import { rankRaceEntries } from "@/lib/ranking";
+import { assignPointsFromManualPositions } from "@/lib/ranking";
+
+interface ResultInput {
+  entryId: number;
+  finishPosition: number | null;
+}
+
+function parseResults(value: unknown): ResultInput[] | null {
+  if (!Array.isArray(value)) return null;
+  const out: ResultInput[] = [];
+  for (const raw of value) {
+    if (!raw || typeof raw !== "object") return null;
+    const r = raw as Record<string, unknown>;
+    const entryId = Number(r.entryId);
+    if (!Number.isInteger(entryId)) return null;
+    const posRaw = r.finishPosition;
+    let finishPosition: number | null;
+    if (posRaw === null || posRaw === undefined || posRaw === "") {
+      finishPosition = null;
+    } else {
+      const num = Number(posRaw);
+      if (!Number.isInteger(num) || num < 1) return null;
+      finishPosition = num;
+    }
+    out.push({ entryId, finishPosition });
+  }
+  return out;
+}
 
 export async function POST(
   req: NextRequest,
@@ -26,6 +53,10 @@ export async function POST(
   const ageClassId = Number(body?.ageClassId);
   if (!Number.isFinite(ageClassId)) {
     return NextResponse.json({ error: "invalid_age_class" }, { status: 400 });
+  }
+  const results = parseResults(body?.results);
+  if (!results) {
+    return NextResponse.json({ error: "invalid_results" }, { status: 400 });
   }
 
   const [event] = await db
@@ -67,17 +98,45 @@ export async function POST(
     return NextResponse.json({ error: "no_entries" }, { status: 400 });
   }
 
-  const ranked = rankRaceEntries(classEntries, pointsScale);
+  // Every submitted entryId must belong to this class; reject stale forms.
+  const classEntryIds = new Set(classEntries.map((e) => e.entryId));
+  for (const r of results) {
+    if (!classEntryIds.has(r.entryId)) {
+      return NextResponse.json({ error: "invalid_entry" }, { status: 400 });
+    }
+  }
+
+  // Positions must be unique within the class.
+  const seen = new Set<number>();
+  for (const r of results) {
+    if (r.finishPosition === null) continue;
+    if (seen.has(r.finishPosition)) {
+      return NextResponse.json(
+        { error: "duplicate_position" },
+        { status: 400 },
+      );
+    }
+    seen.add(r.finishPosition);
+  }
+
+  const positionsByEntryId = new Map<number, number | null>(
+    results.map((r) => [r.entryId, r.finishPosition] as const),
+  );
+  const assigned = assignPointsFromManualPositions(
+    classEntries,
+    positionsByEntryId,
+    pointsScale,
+  );
 
   await db.transaction(async (tx) => {
-    for (const r of ranked) {
+    for (const r of assigned) {
       await tx
         .update(raceEntries)
         .set({
           finishPosition: r.finishPosition,
           pointsAwarded: r.pointsAwarded,
         })
-        .where(eq(raceEntries.id, r.entry.entryId));
+        .where(eq(raceEntries.id, r.entryId));
     }
 
     await tx.insert(eventAgeClassFinalizations).values({
@@ -88,6 +147,6 @@ export async function POST(
 
   return NextResponse.json({
     ok: true,
-    entriesUpdated: ranked.length,
+    entriesUpdated: assigned.length,
   });
 }

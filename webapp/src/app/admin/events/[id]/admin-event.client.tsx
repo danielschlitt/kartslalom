@@ -19,6 +19,8 @@ export interface AdminEntry {
   teamName: string;
   startingOrder: number | null;
   driverType: "championship" | "vorstarter" | "gaststarter";
+  /** Last saved finishing position from the Endwertung, if any. */
+  storedFinishPosition: number | null;
   runs: {
     test: RunValue | null;
     first: RunValue | null;
@@ -267,94 +269,146 @@ function AgeClassEditor({
     return a.lastName.localeCompare(b.lastName);
   });
 
+  const isCurrentlyLive =
+    eventStatus === "live" && liveAgeClassId === group.ageClassId;
+
   return (
-    <section className="rounded-lg border border-[var(--color-border)] bg-[var(--color-surface)]">
-      <div className="flex flex-wrap items-center justify-between gap-2 border-b border-[var(--color-border)] px-4 py-2">
-        <div className="flex items-center gap-2">
-          <h3 className="text-sm font-semibold tracking-wider text-[var(--color-muted)] uppercase">
-            {group.name}
-          </h3>
-          {liveAgeClassId === group.ageClassId && (
-            <span className="inline-flex items-center gap-1 rounded-md bg-[var(--color-live)]/15 px-2 py-0.5 text-xs font-semibold text-[var(--color-live)]">
-              <Zap className="h-3 w-3 animate-pulse" />
-              LIVE
-            </span>
-          )}
-          {group.isFinalized && (
-            <span className="inline-flex items-center gap-1 rounded-md bg-[var(--color-rank-grey)]/20 px-2 py-0.5 text-xs font-semibold text-[var(--color-muted)]">
-              <Check className="h-3 w-3" />
-              Finalisiert
-            </span>
-          )}
+    <section className="space-y-4">
+      <div className="rounded-lg border border-[var(--color-border)] bg-[var(--color-surface)]">
+        <div className="flex flex-wrap items-center justify-between gap-2 border-b border-[var(--color-border)] px-4 py-2">
+          <div className="flex items-center gap-2">
+            <h3 className="text-sm font-semibold tracking-wider text-[var(--color-muted)] uppercase">
+              {group.name} — Live-Zeiten
+            </h3>
+            {isCurrentlyLive && (
+              <span className="inline-flex items-center gap-1 rounded-md bg-[var(--color-live)]/15 px-2 py-0.5 text-xs font-semibold text-[var(--color-live)]">
+                <Zap className="h-3 w-3 animate-pulse" />
+                LIVE
+              </span>
+            )}
+            {group.isFinalized && (
+              <span className="inline-flex items-center gap-1 rounded-md bg-[var(--color-rank-grey)]/20 px-2 py-0.5 text-xs font-semibold text-[var(--color-muted)]">
+                <Check className="h-3 w-3" />
+                Finalisiert
+              </span>
+            )}
+          </div>
         </div>
-        {!group.isFinalized && (
-          <FinalizeButton
-            eventId={eventId}
-            ageClassId={group.ageClassId}
-            disabled={
-              eventStatus === "live" && liveAgeClassId === group.ageClassId
-            }
-            onFinalized={onChange}
-          />
-        )}
+        <div className="overflow-x-auto">
+          <table className="w-full text-sm">
+            <thead className="text-xs tracking-wide text-[var(--color-muted)] uppercase">
+              <tr className="border-b border-[var(--color-border)]">
+                <th className="px-2 py-2 text-left">Start</th>
+                <th className="px-3 py-2 text-left">Fahrer</th>
+                <th className="px-3 py-2 text-left">Verein</th>
+                <th className="px-2 py-2 text-right">Test Zeit</th>
+                <th className="px-2 py-2 text-right">Test +s</th>
+                <th className="px-2 py-2 text-right">L1 Zeit</th>
+                <th className="px-2 py-2 text-right">L1 +s</th>
+                <th className="px-2 py-2 text-right">L2 Zeit</th>
+                <th className="px-2 py-2 text-right">L2 +s</th>
+              </tr>
+            </thead>
+            <tbody>
+              {sorted.map((e) => (
+                <EntryRow key={e.entryId} entry={e} onChange={onChange} />
+              ))}
+            </tbody>
+          </table>
+        </div>
       </div>
-      <div className="overflow-x-auto">
-        <table className="w-full text-sm">
-          <thead className="text-xs tracking-wide text-[var(--color-muted)] uppercase">
-            <tr className="border-b border-[var(--color-border)]">
-              <th className="px-2 py-2 text-left">Start</th>
-              <th className="px-3 py-2 text-left">Fahrer</th>
-              <th className="px-3 py-2 text-left">Verein</th>
-              <th className="px-2 py-2 text-right">Test Zeit</th>
-              <th className="px-2 py-2 text-right">Test +s</th>
-              <th className="px-2 py-2 text-right">L1 Zeit</th>
-              <th className="px-2 py-2 text-right">L1 +s</th>
-              <th className="px-2 py-2 text-right">L2 Zeit</th>
-              <th className="px-2 py-2 text-right">L2 +s</th>
-            </tr>
-          </thead>
-          <tbody>
-            {sorted.map((e) => (
-              <EntryRow key={e.entryId} entry={e} onChange={onChange} />
-            ))}
-          </tbody>
-        </table>
-      </div>
+
+      {!group.isFinalized && !isCurrentlyLive && (
+        <ManualResultsForm
+          eventId={eventId}
+          ageClassId={group.ageClassId}
+          ageClassName={group.name}
+          entries={sorted}
+          onSaved={onChange}
+        />
+      )}
     </section>
   );
 }
 
-function FinalizeButton({
+function ManualResultsForm({
   eventId,
   ageClassId,
-  disabled,
-  onFinalized,
+  ageClassName,
+  entries,
+  onSaved,
 }: {
   eventId: number;
   ageClassId: number;
-  disabled: boolean;
-  onFinalized: () => void;
+  ageClassName: string;
+  entries: AdminEntry[];
+  onSaved: () => void;
 }) {
+  const [positions, setPositions] = useState<Record<number, string>>(() =>
+    Object.fromEntries(
+      entries.map((e) => [
+        e.entryId,
+        e.storedFinishPosition === null ? "" : String(e.storedFinishPosition),
+      ]),
+    ),
+  );
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
-  const finalize = async () => {
+  const sortedForForm = [...entries].sort((a, b) => {
+    const sa = a.storedFinishPosition ?? Number.MAX_SAFE_INTEGER;
+    const sb = b.storedFinishPosition ?? Number.MAX_SAFE_INTEGER;
+    if (sa !== sb) return sa - sb;
+    return a.lastName.localeCompare(b.lastName);
+  });
+
+  const updatePosition = (entryId: number, value: string) => {
+    setPositions((prev) => ({ ...prev, [entryId]: value }));
+  };
+
+  const validate = (): { entryId: number; finishPosition: number | null }[] | null => {
+    const results: { entryId: number; finishPosition: number | null }[] = [];
+    const seen = new Set<number>();
+    for (const e of entries) {
+      const raw = positions[e.entryId] ?? "";
+      if (raw === "") {
+        results.push({ entryId: e.entryId, finishPosition: null });
+        continue;
+      }
+      const num = Number(raw);
+      if (!Number.isInteger(num) || num < 1) {
+        setError(`Ungültige Position für ${e.lastName} ${e.firstName}.`);
+        return null;
+      }
+      if (seen.has(num)) {
+        setError(`Position ${num} ist doppelt vergeben.`);
+        return null;
+      }
+      seen.add(num);
+      results.push({ entryId: e.entryId, finishPosition: num });
+    }
+    return results;
+  };
+
+  const save = async () => {
+    setError(null);
+    const results = validate();
+    if (!results) return;
     if (
       !confirm(
-        "Endwertung speichern? Meisterschaftspunkte werden aus den aktuellen Zeiten berechnet und können danach nicht mehr automatisch geändert werden.",
+        `Endwertung für ${ageClassName} speichern? Die Meisterschaftspunkte werden anhand der Positionen vergeben und die Klasse wird finalisiert.`,
       )
     ) {
       return;
     }
     setBusy(true);
-    setError(null);
     try {
       const res = await fetch(
         `/api/admin/events/${eventId}/finalize-age-class`,
         {
           method: "POST",
           headers: { "content-type": "application/json" },
-          body: JSON.stringify({ ageClassId }),
+          body: JSON.stringify({ ageClassId, results }),
         },
       );
       if (!res.ok) {
@@ -362,35 +416,101 @@ function FinalizeButton({
         setError(
           data.error === "age_class_still_live"
             ? "Altersklasse ist noch live — zuerst andere Klasse auswählen."
-            : "Speichern fehlgeschlagen.",
+            : data.error === "duplicate_position"
+              ? "Doppelte Positionen — bitte korrigieren."
+              : data.error === "invalid_entry"
+                ? "Ein Fahrer gehört nicht zur Altersklasse."
+                : "Speichern fehlgeschlagen.",
         );
         return;
       }
-      onFinalized();
+      onSaved();
     } finally {
       setBusy(false);
     }
   };
 
   return (
-    <div className="flex items-center gap-2">
-      {error && <span className="text-xs text-red-400">{error}</span>}
-      <button
-        onClick={finalize}
-        disabled={disabled || busy}
-        title={
-          disabled
-            ? "Altersklasse muss zuerst beendet werden (nicht mehr als live markiert)"
-            : undefined
-        }
-        className={cn(
-          "inline-flex items-center gap-1.5 rounded-md border border-[var(--color-border)] bg-[var(--color-surface-2)] px-3 py-1 text-xs font-medium hover:bg-[var(--color-background)]",
-          (disabled || busy) && "cursor-not-allowed opacity-50",
-        )}
-      >
-        <Check className="h-3.5 w-3.5" />
-        {busy ? "Speichern…" : "Endwertung speichern"}
-      </button>
+    <div className="rounded-lg border border-[var(--color-border)] bg-[var(--color-surface)]">
+      <div className="flex flex-wrap items-center justify-between gap-2 border-b border-[var(--color-border)] px-4 py-2">
+        <h3 className="text-sm font-semibold tracking-wider text-[var(--color-muted)] uppercase">
+          {ageClassName} — Endwertung (Meisterschaft)
+        </h3>
+      </div>
+      <div className="space-y-3 p-4">
+        <p className="text-xs text-[var(--color-muted)]">
+          Trage die offiziellen Platzierungen ein. Punkte werden aus der
+          Punktetabelle abgeleitet (nur Meisterschaftsfahrer erhalten Punkte;
+          Vor- und Gaststarter behalten ihre Platzierung, ohne Punkte). Leer
+          lassen = nicht gewertet / DNF.
+        </p>
+        <div className="overflow-x-auto">
+          <table className="w-full text-sm">
+            <thead className="text-xs tracking-wide text-[var(--color-muted)] uppercase">
+              <tr className="border-b border-[var(--color-border)]">
+                <th className="px-3 py-2 text-left">Fahrer</th>
+                <th className="px-3 py-2 text-left">Verein</th>
+                <th className="px-2 py-2 text-right">Platz</th>
+              </tr>
+            </thead>
+            <tbody>
+              {sortedForForm.map((e) => (
+                <tr
+                  key={e.entryId}
+                  className="border-b border-[var(--color-border)]/50 last:border-0"
+                >
+                  <td className="px-3 py-1.5 font-medium">
+                    {e.lastName} {e.firstName}
+                    {e.driverType !== "championship" && (
+                      <span className="ml-2 rounded-sm bg-[var(--color-surface-2)] px-1 py-0.5 text-[10px] text-[var(--color-muted)] uppercase">
+                        {e.driverType}
+                      </span>
+                    )}
+                  </td>
+                  <td className="px-3 py-1.5 text-[var(--color-muted)]">
+                    {e.teamName}
+                  </td>
+                  <td className="px-2 py-1.5 text-right">
+                    <input
+                      type="number"
+                      inputMode="numeric"
+                      min={1}
+                      value={positions[e.entryId] ?? ""}
+                      onChange={(ev) =>
+                        updatePosition(e.entryId, ev.target.value)
+                      }
+                      disabled={busy}
+                      className={cn(
+                        "w-16 rounded-md border border-[var(--color-border)] bg-[var(--color-background)] px-2 py-1 text-right text-sm tabular-nums",
+                        busy && "opacity-50",
+                      )}
+                      placeholder="—"
+                    />
+                  </td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+        <div className="flex flex-wrap items-center justify-between gap-2">
+          {error ? (
+            <span className="text-xs text-red-400">{error}</span>
+          ) : (
+            <span />
+          )}
+          <button
+            onClick={save}
+            disabled={busy}
+            className={cn(
+              "inline-flex items-center gap-1.5 rounded-md border border-[var(--color-border)] bg-[var(--color-surface-2)] px-3 py-1.5 text-xs font-medium hover:bg-[var(--color-background)]",
+              busy && "cursor-not-allowed opacity-50",
+            )}
+          >
+            <Check className="h-3.5 w-3.5" />
+            {busy ? "Speichern…" : "Endwertung speichern"}
+          </button>
+        </div>
+      </div>
     </div>
   );
 }

@@ -4,9 +4,8 @@ import { StandingsTable } from "@/components/standings-table";
 import {
   getEnrichedEntriesForEvent,
   getLiveEvent,
-  getPointsScale,
 } from "@/lib/dal/races";
-import { computeHighlights, rankRaceEntries } from "@/lib/ranking";
+import { computeHighlights, rankLiveStandings } from "@/lib/ranking";
 import { formatDateDe } from "@/lib/utils";
 import { db } from "@/db/drizzle";
 import { ageClasses } from "@/db/schema";
@@ -52,9 +51,8 @@ export default async function LivePage() {
     );
   }
 
-  const [entries, pointsScale, ageClass] = await Promise.all([
+  const [entries, ageClass] = await Promise.all([
     getEnrichedEntriesForEvent(liveEvent.id),
-    getPointsScale(),
     db
       .select({ name: ageClasses.name })
       .from(ageClasses)
@@ -66,7 +64,7 @@ export default async function LivePage() {
   const classEntries = entries.filter(
     (e) => e.ageClassId === liveEvent.liveAgeClassId,
   );
-  const ranked = rankRaceEntries(classEntries, pointsScale);
+  const ranked = rankLiveStandings(classEntries);
   const highlights = computeHighlights(classEntries);
 
   return (
@@ -74,8 +72,9 @@ export default async function LivePage() {
       <LiveHeader event={liveEvent} ageClassName={ageClass?.name} />
 
       <p className="text-xs text-[var(--color-muted)]">
-        Live-Zwischenstand — zählt nicht für die Meisterschaft. Endwertung wird
-        im Admin nach Abschluss der Altersklasse gespeichert.
+        Live-Zwischenstand nach Zeiten — zählt nicht für die Meisterschaft. Die
+        Endwertung wird im Admin nach Abschluss der Altersklasse manuell
+        eingetragen.
       </p>
 
       <StandingsTable
@@ -83,6 +82,7 @@ export default async function LivePage() {
         ranked={ranked}
         highlights={highlights}
         showTestRun
+        showPoints={false}
       />
 
       <script

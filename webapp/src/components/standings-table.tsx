@@ -21,12 +21,17 @@ export function StandingsTable({
   ranked,
   highlights,
   showTestRun,
+  showPoints = true,
 }: {
   ageClassName: string;
   ranked: RankedEntry<EnrichedEntry>[];
   highlights: Map<number, EntryHighlights>;
   showTestRun?: boolean;
+  /** Set to false on the live page so provisional standings never imply championship points. */
+  showPoints?: boolean;
 }) {
+  const emptyColSpan =
+    3 + (showPoints ? 1 : 0) + (showTestRun ? 3 : 0) + 3 + 3 + 1;
   return (
     <div className="rounded-lg border border-[var(--color-border)] bg-[var(--color-surface)]">
       <div className="flex items-center justify-between border-b border-[var(--color-border)] px-4 py-2">
@@ -48,7 +53,9 @@ export function StandingsTable({
                 Fahrer
               </th>
               <th rowSpan={2} className="px-3 py-2 text-left">Verein</th>
-              <th rowSpan={2} className="px-3 py-2 text-right">Punkte</th>
+              {showPoints && (
+                <th rowSpan={2} className="px-3 py-2 text-right">Punkte</th>
+              )}
               {showTestRun && (
                 <th colSpan={3} className="border-l border-[var(--color-border)] px-2 py-1 text-center">
                   Testlauf
@@ -73,7 +80,7 @@ export function StandingsTable({
           <tbody>
             {ranked.length === 0 ? (
               <tr>
-                <td colSpan={showTestRun ? 14 : 11} className="px-3 py-6 text-center text-[var(--color-muted)]">
+                <td colSpan={emptyColSpan} className="px-3 py-6 text-center text-[var(--color-muted)]">
                   Keine Einträge.
                 </td>
               </tr>
@@ -117,9 +124,11 @@ export function StandingsTable({
                       </div>
                     </td>
                     <td className="px-3 py-1.5 text-[var(--color-muted)]">{e.teamName}</td>
-                    <td className="px-3 py-1.5 text-right text-base font-semibold tabular-nums">
-                      {r.pointsAwarded}
-                    </td>
+                    {showPoints && (
+                      <td className="px-3 py-1.5 text-right text-base font-semibold tabular-nums">
+                        {r.pointsAwarded}
+                      </td>
+                    )}
                     {showTestRun && (
                       <RunCells run={e.runs.test} withSeparator />
                     )}

@@ -141,6 +141,77 @@ export function rankRaceEntries<T extends RankableEntry>(
   });
 }
 
+const EMPTY_POINTS_SCALE: ReadonlyMap<number, number> = new Map();
+
+/**
+ * Rank an age class purely for live display: positions are derived from run
+ * times like {@link rankRaceEntries}, but no championship points are awarded.
+ * Use this on the /live page so the provisional view never implies points
+ * that have not been officially assigned yet.
+ */
+export function rankLiveStandings<T extends RankableEntry>(
+  entries: readonly T[],
+  view: ViewMode = DEFAULT_VIEW,
+): RankedEntry<T>[] {
+  const ranked = rankRaceEntries(entries, EMPTY_POINTS_SCALE, view);
+  return ranked.map((r) => ({ ...r, pointsAwarded: 0 }));
+}
+
+export interface ManualResult {
+  entryId: number;
+  finishPosition: number | null;
+  pointsAwarded: number;
+}
+
+/**
+ * Convert a set of manually-assigned finishing positions for one age class
+ * into the points each entry should receive.
+ *
+ * - Only championship drivers consume points slots; vorstarter/gaststarter
+ *   keep their assigned position but never receive points.
+ * - Entries with `null` position (DNF / not entered) get 0 points.
+ * - Slot order follows the assigned positions (1, 2, 3, ...) — gaps and ties
+ *   in the input are tolerated; the caller is expected to validate uniqueness
+ *   before invoking this helper.
+ */
+export function assignPointsFromManualPositions<T extends RankableEntry>(
+  entries: readonly T[],
+  positionsByEntryId: ReadonlyMap<number, number | null>,
+  pointsScale: ReadonlyMap<number, number>,
+): ManualResult[] {
+  const withPos = entries.map((entry) => ({
+    entry,
+    finishPosition: positionsByEntryId.get(entry.entryId) ?? null,
+  }));
+
+  withPos.sort((a, b) => {
+    const ap = a.finishPosition;
+    const bp = b.finishPosition;
+    if (ap === null && bp === null) return a.entry.driverId - b.entry.driverId;
+    if (ap === null) return 1;
+    if (bp === null) return -1;
+    if (ap === bp) return a.entry.driverId - b.entry.driverId;
+    return ap - bp;
+  });
+
+  let championshipRank = 0;
+  return withPos.map((row) => {
+    let pointsAwarded = 0;
+    if (
+      row.finishPosition !== null &&
+      row.entry.driverType === "championship"
+    ) {
+      championshipRank += 1;
+      pointsAwarded = pointsScale.get(championshipRank) ?? 0;
+    }
+    return {
+      entryId: row.entry.entryId,
+      finishPosition: row.finishPosition,
+      pointsAwarded,
+    };
+  });
+}
+
 /* ────────────────────────────────────────────────────────────────────────── */
 /* Highlights                                                                 */
 /* ────────────────────────────────────────────────────────────────────────── */
