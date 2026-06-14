@@ -62,7 +62,7 @@ interface ParsedDriver {
   firstName: string;
   lastName: string;
   teamName: string;
-  positions: number[]; // length 5, 0 = did not participate
+  positions: number[]; // length 6, 0 = did not participate
 }
 
 function readDataFile(name: string): string[] {
@@ -137,8 +137,8 @@ function parseDrivers(): ParsedDriver[] {
         .map((s) => Number(s.trim()))
         .filter((n) => Number.isFinite(n));
     }
-    while (positions.length < 5) positions.push(0);
-    positions = positions.slice(0, 5);
+    while (positions.length < 6) positions.push(0);
+    positions = positions.slice(0, 6);
 
     out.push({
       ageClass,
@@ -204,7 +204,7 @@ async function seed() {
       console.warn(`  team not found for event #${e.number}: ${e.teamName}`);
       continue;
     }
-    const status = e.number <= 5 ? "completed" : "upcoming";
+    const status = e.number <= 6 ? "completed" : "upcoming";
     await db
       .insert(schema.raceEvents)
       .values({
@@ -224,6 +224,7 @@ async function seed() {
           hostTeamId,
           isHmj: e.isHmj,
           kartType: e.kartType,
+          status,
         },
       });
   }
@@ -260,8 +261,8 @@ async function seed() {
       .onConflictDoNothing();
   }
 
-  // 6. Race entries for races 1–5 with finish position + computed points
-  console.log("Seeding race entries for races 1–5 (with stored points)…");
+  // 6. Race entries for races 1–6 with finish position + computed points
+  console.log("Seeding race entries for races 1–6 (with stored points)…");
   const dbDrivers = await db.select().from(schema.drivers);
   const driverByKey = new Map(
     dbDrivers.map(
@@ -282,7 +283,7 @@ async function seed() {
     const driver = driverByKey.get(`${d.firstName}|${d.lastName}|${teamId}`);
     if (!driver) continue;
 
-    for (let i = 0; i < 5; i++) {
+    for (let i = 0; i < 6; i++) {
       const raceNumber = i + 1;
       const event = eventByNumber.get(raceNumber);
       if (!event) continue;
@@ -314,8 +315,8 @@ async function seed() {
     }
   }
 
-  // 7. Race entries for upcoming races 6–8 (championship drivers, no positions)
-  console.log("Seeding race entries for races 6–8 (empty, ready for live)…");
+  // 7. Race entries for upcoming races 7–8 (championship drivers, no positions)
+  console.log("Seeding race entries for races 7–8 (empty, ready for live)…");
   for (const d of supportedDrivers) {
     const teamId = teamIdByName.get(d.teamName);
     const ageClassId = ageClassIdByName.get(d.ageClass);
@@ -323,7 +324,7 @@ async function seed() {
     const driver = driverByKey.get(`${d.firstName}|${d.lastName}|${teamId}`);
     if (!driver) continue;
 
-    for (let raceNumber = 6; raceNumber <= 8; raceNumber++) {
+    for (let raceNumber = 7; raceNumber <= 8; raceNumber++) {
       const event = eventByNumber.get(raceNumber);
       if (!event) continue;
       await db
@@ -340,9 +341,9 @@ async function seed() {
     }
   }
 
-  // 8. Mark age classes in completed events (races 1–5) as finalized
-  console.log("Seeding age-class finalizations for races 1–5…");
-  for (let raceNumber = 1; raceNumber <= 5; raceNumber++) {
+  // 8. Mark age classes in completed events (races 1–6) as finalized
+  console.log("Seeding age-class finalizations for races 1–6…");
+  for (let raceNumber = 1; raceNumber <= 6; raceNumber++) {
     const event = eventByNumber.get(raceNumber);
     if (!event) continue;
     for (const ageClassId of ageClassIdByName.values()) {
