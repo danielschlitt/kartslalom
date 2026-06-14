@@ -1,0 +1,398 @@
+/**
+ * Pure ranking + championship logic. No DB or React imports here so it stays
+ * easy to unit-test and re-use on both server and client.
+ */
+
+export type RunType = "test" | "first" | "second";
+export type DriverType = "championship" | "vorstarter" | "gaststarter";
+
+export interface RunValue {
+  timeSeconds: number | null;
+  penaltySeconds: number;
+}
+
+export interface EntryRuns {
+  test: RunValue | null;
+  first: RunValue | null;
+  second: RunValue | null;
+}
+
+export interface RankableEntry {
+  entryId: number;
+  driverId: number;
+  driverType: DriverType;
+  ageClassId: number;
+  runs: EntryRuns;
+  /** Stored points awarded for this entry (used when no live recomputation). */
+  storedPointsAwarded?: number;
+  /** Stored finish position (used when no live recomputation). */
+  storedFinishPosition?: number | null;
+}
+
+export type Metric = "first" | "second" | "best" | "sum";
+export type PenaltyMode = "with" | "without" | "only";
+
+export interface ViewMode {
+  metric: Metric;
+  penaltyMode: PenaltyMode;
+}
+
+export const DEFAULT_VIEW: ViewMode = { metric: "best", penaltyMode: "with" };
+
+const SCORING_RUNS: RunType[] = ["first", "second"];
+
+/**
+ * Compute the metric a single entry is ranked by under the given view.
+ * Returns null when the entry has no usable time for that view.
+ */
+export function entryMetricValue(
+  runs: EntryRuns,
+  view: ViewMode,
+): number | null {
+  const r1 = runs.first;
+  const r2 = runs.second;
+
+  const value = (r: RunValue | null): number | null => {
+    if (!r) return null;
+    if (view.penaltyMode === "only") return r.penaltySeconds;
+    if (r.timeSeconds === null) return null;
+    return view.penaltyMode === "with"
+      ? r.timeSeconds + r.penaltySeconds
+      : r.timeSeconds;
+  };
+
+  switch (view.metric) {
+    case "first":
+      return value(r1);
+    case "second":
+      return value(r2);
+    case "best": {
+      const a = value(r1);
+      const b = value(r2);
+      if (a === null) return b;
+      if (b === null) return a;
+      return Math.min(a, b);
+    }
+    case "sum": {
+      const a = value(r1);
+      const b = value(r2);
+      if (a === null && b === null) return null;
+      // If only one run exists we still want the entry rankable.
+      return (a ?? 0) + (b ?? 0);
+    }
+  }
+}
+
+export interface RankedEntry<T extends RankableEntry = RankableEntry> {
+  entry: T;
+  metricValue: number | null;
+  finishPosition: number | null;
+  pointsAwarded: number;
+  /** True when a championship driver could not be ranked (no time). */
+  isPending: boolean;
+}
+
+/**
+ * Rank all entries in a single age class for a single race.
+ * - All driver types are included in finish position.
+ * - Only championship drivers consume points slots.
+ * - Entries without a metric value rank after timed entries (DNF-style) and
+ *   receive 0 points.
+ */
+export function rankRaceEntries<T extends RankableEntry>(
+  entries: readonly T[],
+  pointsScale: ReadonlyMap<number, number>,
+  view: ViewMode = DEFAULT_VIEW,
+): RankedEntry<T>[] {
+  const withMetric = entries.map((entry) => ({
+    entry,
+    metricValue: entryMetricValue(entry.runs, view),
+  }));
+
+  withMetric.sort((a, b) => {
+    const av = a.metricValue;
+    const bv = b.metricValue;
+    if (av === null && bv === null) return a.entry.driverId - b.entry.driverId;
+    if (av === null) return 1;
+    if (bv === null) return -1;
+    if (av === bv) return a.entry.driverId - b.entry.driverId;
+    return av - bv;
+  });
+
+  let championshipRank = 0;
+
+  return withMetric.map((row, idx) => {
+    const ranked = row.metricValue !== null;
+    const finishPosition = ranked ? idx + 1 : null;
+    let pointsAwarded = 0;
+
+    if (ranked && row.entry.driverType === "championship") {
+      championshipRank += 1;
+      pointsAwarded = pointsScale.get(championshipRank) ?? 0;
+    }
+
+    return {
+      entry: row.entry,
+      metricValue: row.metricValue,
+      finishPosition,
+      pointsAwarded,
+      isPending: row.entry.driverType === "championship" && !ranked,
+    };
+  });
+}
+
+/* ────────────────────────────────────────────────────────────────────────── */
+/* Highlights                                                                 */
+/* ────────────────────────────────────────────────────────────────────────── */
+
+export type RunColumn = "raw" | "total";
+
+export interface RunHighlight {
+  /** Cell is the fastest in its own run (run1 raw, run1 total, …). */
+  fastestInRun: { raw: boolean; total: boolean };
+  /** Cell belongs to the run that is the overall best across run1/run2. */
+  fastestOverall: { raw: boolean; total: boolean };
+}
+
+export interface EntryHighlights {
+  first: RunHighlight;
+  second: RunHighlight;
+}
+
+interface BestPerColumn {
+  run1Raw: number | null;
+  run1Total: number | null;
+  run2Raw: number | null;
+  run2Total: number | null;
+  bestRaw: number | null;
+  bestTotal: number | null;
+}
+
+/**
+ * Compute per-class fastest-times metadata so the UI can colour cells.
+ * Green = fastest in that column for that run.
+ * Violet = belongs to the run that holds the overall fastest time across
+ * both Wertungsläufe (raw or total).
+ */
+export function computeHighlights<T extends RankableEntry>(
+  entries: readonly T[],
+): Map<number, EntryHighlights> {
+  const best: BestPerColumn = {
+    run1Raw: null,
+    run1Total: null,
+    run2Raw: null,
+    run2Total: null,
+    bestRaw: null,
+    bestTotal: null,
+  };
+
+  const min = (a: number | null, b: number | null) =>
+    a === null ? b : b === null ? a : Math.min(a, b);
+
+  for (const e of entries) {
+    const r1 = e.runs.first;
+    const r2 = e.runs.second;
+    if (r1?.timeSeconds !== null && r1?.timeSeconds !== undefined) {
+      best.run1Raw = min(best.run1Raw, r1.timeSeconds);
+      best.run1Total = min(best.run1Total, r1.timeSeconds + r1.penaltySeconds);
+    }
+    if (r2?.timeSeconds !== null && r2?.timeSeconds !== undefined) {
+      best.run2Raw = min(best.run2Raw, r2.timeSeconds);
+      best.run2Total = min(best.run2Total, r2.timeSeconds + r2.penaltySeconds);
+    }
+  }
+
+  best.bestRaw = min(best.run1Raw, best.run2Raw);
+  best.bestTotal = min(best.run1Total, best.run2Total);
+
+  const out = new Map<number, EntryHighlights>();
+
+  for (const e of entries) {
+    const hl: EntryHighlights = {
+      first: {
+        fastestInRun: { raw: false, total: false },
+        fastestOverall: { raw: false, total: false },
+      },
+      second: {
+        fastestInRun: { raw: false, total: false },
+        fastestOverall: { raw: false, total: false },
+      },
+    };
+
+    const mark = (
+      r: RunValue | null,
+      slot: RunHighlight,
+      runRaw: number | null,
+      runTotal: number | null,
+    ) => {
+      if (!r || r.timeSeconds === null) return;
+      const total = r.timeSeconds + r.penaltySeconds;
+      slot.fastestInRun.raw = runRaw !== null && r.timeSeconds === runRaw;
+      slot.fastestInRun.total = runTotal !== null && total === runTotal;
+      slot.fastestOverall.raw =
+        best.bestRaw !== null && r.timeSeconds === best.bestRaw;
+      slot.fastestOverall.total =
+        best.bestTotal !== null && total === best.bestTotal;
+    };
+
+    mark(e.runs.first, hl.first, best.run1Raw, best.run1Total);
+    mark(e.runs.second, hl.second, best.run2Raw, best.run2Total);
+
+    out.set(e.entryId, hl);
+  }
+
+  return out;
+}
+
+/* ────────────────────────────────────────────────────────────────────────── */
+/* Championship                                                               */
+/* ────────────────────────────────────────────────────────────────────────── */
+
+export interface DriverRaceResult {
+  raceEventId: number;
+  raceNumber: number;
+  isHmj: boolean;
+  pointsAwarded: number;
+  participated: boolean;
+  penaltySecondsTotal: number;
+}
+
+export interface DriverChampionshipInput {
+  driverId: number;
+  firstName: string;
+  lastName: string;
+  teamName: string;
+  ageClassId: number;
+  ageClassName: string;
+  driverType: DriverType;
+  results: DriverRaceResult[];
+}
+
+export interface ChampionshipRow {
+  driverId: number;
+  firstName: string;
+  lastName: string;
+  teamName: string;
+  ageClassId: number;
+  ageClassName: string;
+  driverType: DriverType;
+  /** Per-event points keyed by raceNumber. */
+  perRace: Record<number, number>;
+  /** Race numbers whose points have been dropped per series rules. */
+  droppedRaceNumbers: number[];
+  startedRaces: number;
+  totalPoints: number;
+  totalPenaltySeconds: number;
+  rank: number;
+}
+
+export type Series = "hts" | "hmj";
+
+export interface ChampionshipOptions {
+  series: Series;
+  /** Race numbers belonging to the series (used to scope perRace + drops). */
+  seriesRaceNumbers: number[];
+}
+
+const DROP_COUNT: Record<Series, number> = { hts: 2, hmj: 1 };
+
+/**
+ * Aggregate per-driver race results into a championship table with shared
+ * ranks (ties keep the same rank, the next rank is offset by the tie size).
+ *
+ * Vorstarter and Gaststarter never accrue championship points and are
+ * filtered out.
+ */
+export function computeChampionship(
+  drivers: readonly DriverChampionshipInput[],
+  options: ChampionshipOptions,
+): ChampionshipRow[] {
+  const { seriesRaceNumbers } = options;
+  const dropCount = DROP_COUNT[options.series];
+
+  const rows: ChampionshipRow[] = drivers
+    .filter((d) => d.driverType === "championship")
+    .map((d) => {
+      const seriesResults = d.results.filter((r) =>
+        seriesRaceNumbers.includes(r.raceNumber),
+      );
+
+      const perRace: Record<number, number> = {};
+      for (const num of seriesRaceNumbers) perRace[num] = 0;
+      for (const r of seriesResults) perRace[r.raceNumber] = r.pointsAwarded;
+
+      const startedRaces = seriesResults.filter((r) => r.participated).length;
+      const totalPenaltySeconds = seriesResults.reduce(
+        (s, r) => s + r.penaltySecondsTotal,
+        0,
+      );
+
+      const dropped = pickDroppedRaces(seriesRaceNumbers, perRace, dropCount);
+      const totalPoints = seriesRaceNumbers.reduce((sum, num) => {
+        if (dropped.includes(num)) return sum;
+        return sum + (perRace[num] ?? 0);
+      }, 0);
+
+      return {
+        driverId: d.driverId,
+        firstName: d.firstName,
+        lastName: d.lastName,
+        teamName: d.teamName,
+        ageClassId: d.ageClassId,
+        ageClassName: d.ageClassName,
+        driverType: d.driverType,
+        perRace,
+        droppedRaceNumbers: dropped,
+        startedRaces,
+        totalPoints,
+        totalPenaltySeconds,
+        rank: 0,
+      };
+    });
+
+  // Sort by total points desc, then started races desc, then last name as tie-break.
+  rows.sort((a, b) => {
+    if (b.totalPoints !== a.totalPoints) return b.totalPoints - a.totalPoints;
+    if (b.startedRaces !== a.startedRaces)
+      return b.startedRaces - a.startedRaces;
+    return a.lastName.localeCompare(b.lastName);
+  });
+
+  // Shared ranks: ties get the same rank; next rank skips the tie size.
+  let i = 0;
+  while (i < rows.length) {
+    let j = i + 1;
+    while (
+      j < rows.length &&
+      rows[j].totalPoints === rows[i].totalPoints &&
+      rows[j].startedRaces === rows[i].startedRaces
+    ) {
+      j += 1;
+    }
+    for (let k = i; k < j; k++) rows[k].rank = i + 1;
+    i = j;
+  }
+
+  return rows;
+}
+
+/**
+ * Drop the lowest-scoring `dropCount` races for a single driver.
+ * Ties at the threshold prefer the higher race number so the latest
+ * (and typically most recent) bad result is dropped first — matches the
+ * intuitive UI behaviour without affecting totals.
+ */
+function pickDroppedRaces(
+  raceNumbers: number[],
+  perRace: Record<number, number>,
+  dropCount: number,
+): number[] {
+  if (dropCount <= 0) return [];
+  const ordered = [...raceNumbers].sort((a, b) => {
+    const pa = perRace[a] ?? 0;
+    const pb = perRace[b] ?? 0;
+    if (pa !== pb) return pa - pb;
+    return b - a;
+  });
+  return ordered.slice(0, Math.min(dropCount, ordered.length)).sort();
+}

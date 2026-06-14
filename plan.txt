@@ -1,0 +1,30 @@
+Plan a new Project that keeps in line with my usual tech stack:
+- Makefile for development and deployment
+- docker compose setup to work in an existing traefik setup (see example file @sample-docker-compose.yaml )
+- include everything needed in docker compose file to run the application
+- use react if possible, if needed nextjs
+- use postgres as database
+- use @CleanShot 2026-06-12 at 22.52.56.png  as a design basis
+- use tailwind css
+- create a script to prefill the database (if easier use drizzle)
+
+The application should be simple and is very focused on tables. For now no authentication is needed. I need a quick way to track times with failure points for a racing championship. The championship contains of:
+
+- 8 mainraces for the championship „Hessen-Thüringen Süd“
+- 5 of these races belong to a own championship called „HMJ“
+- Winner is the person getting the most points. 
+- „Hessen-Thüringen Süd“ Championship will have the worst 2 events deleted for the final championship table
+- „HMJ“ Championship will have the worst event deleted
+- If a driver does not take part for a race, he get's 0 points
+- The Championship has 7 categories divided by age
+- each race consists of 1 test run, first „Wertungslauf“ and second „Wertungslauf“
+- Each run has a time and a time penalty in seconds
+- For the first 5 races we already have the standings
+- The website must provide 3 screens: each race event and if it is currently running with live standings, championship standings and live championship standing
+- for live standings we need to have the ability to first set the starting order for each age class and than add each run and it's penalty seconds
+- penalty seconds of each run will be added to the final time. The test runs don't count.
+- as I want to be able to show virtual championship standings for all restruns, only first runs, only second runs, only fastest runs, with penalty seconds and without penalty seconds, only penalty seconds, the table structure should reflect that.
+- in the championship table also show how many races a racer has started, sum of all penalty seconds
+- the quickest run times per run must be visually pointed out with a background color (green for fastest time per run, violet for fastest run of both runs. In the table always show the run time, the penalty seconds and both summed up per run. Background color must be for both: one without errors and one in column with errors.
+- each race event can be run on gasoline or electric
+- in @race-events.txt find all race events with german date format, name of event and in parenthesis if it is a HMJ race and if it runs with electric or gasoline gokarts

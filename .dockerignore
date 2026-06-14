@@ -1,0 +1,13 @@
+**/node_modules
+**/.next
+**/.git
+**/.env
+**/.env.local
+**/.env.build
+**/.DS_Store
+**/coverage
+**/*.log
+.cursor
+plan.txt
+*.png
+sample-docker-compose.yaml

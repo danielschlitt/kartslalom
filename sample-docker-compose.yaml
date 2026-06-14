@@ -1,0 +1,47 @@
+name: trigger
+
+services:
+  webapp:
+    networks:
+      - proxy
+    labels:
+      - "traefik.enable=true"
+      - "traefik.docker.network=proxy"
+      # - "traefik.http.routers.triggerwebapp.rule=Host(`webapp.localhost`)"
+      - "traefik.http.routers.triggerwebapp.rule=Host(`triggerdev.flott.ai`)"
+      - "traefik.http.routers.triggerwebapp.entrypoints=websecure"
+      - "traefik.http.routers.triggerwebapp.tls=true"
+      - "traefik.http.routers.triggerwebapp.tls.certresolver=le"
+      - "traefik.http.services.triggerwebapp.loadbalancer.server.port=3000"
+
+  registry:
+    networks:
+      - proxy
+    labels:
+      - "traefik.enable=true"
+      - "traefik.docker.network=proxy"
+      - "traefik.http.routers.triggerregistry.rule=Host(`registry.localhost`)"
+      - "traefik.http.routers.triggerregistry.entrypoints=websecure"
+      - "traefik.http.routers.triggerregistry.tls=true"
+      - "traefik.http.routers.triggerregistry.tls.certresolver=le"
+      - "traefik.http.services.triggerregistry.loadbalancer.server.port=5000"
+
+  minio:
+    networks:
+      - proxy
+    labels:
+      - "traefik.enable=true"
+      - "traefik.docker.network=proxy"
+      - "traefik.http.routers.triggerminio.rule=Host(`minio.localhost`)"
+      - "traefik.http.routers.triggerminio.entrypoints=websecure"
+      - "traefik.http.routers.triggerminio.tls=true"
+      - "traefik.http.routers.triggerminio.tls.certresolver=le"
+      - "traefik.http.services.triggerminio.loadbalancer.server.port=9000"
+
+volumes:
+  minio:
+  # traefik-letsencrypt:
+
+networks:
+  proxy:
+    name: proxy

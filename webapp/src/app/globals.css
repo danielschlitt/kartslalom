@@ -1,0 +1,51 @@
+@import "tailwindcss";
+
+/*
+ * Constrain Tailwind v4's content detection to our webapp source. Without
+ * this, auto-detection walks up to the FLOTT monorepo root and tries to
+ * extract class names from binary files (the PNG screenshot in the project
+ * root, etc.), which produces malformed `.bg-[var(--color-...)]` rules.
+ */
+@source "../../src/**/*.{ts,tsx,js,jsx,mjs}";
+
+@theme {
+  --color-background: #0b161c;
+  --color-surface: #111d24;
+  --color-surface-2: #16252e;
+  --color-border: #1f3540;
+  --color-foreground: #e6eef3;
+  --color-muted: #8aa0ad;
+  --color-accent: #e63946;
+  --color-accent-foreground: #ffffff;
+
+  --color-rank-blue: #2563eb;
+  --color-rank-green: #16a34a;
+  --color-rank-grey: #475569;
+
+  --color-fastest-run: #064e3b;
+  --color-fastest-run-fg: #6ee7b7;
+  --color-fastest-overall: #4c1d95;
+  --color-fastest-overall-fg: #c4b5fd;
+
+  --color-live: #ef4444;
+  --color-pending: #f59e0b;
+
+  --font-sans: ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont,
+    "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif;
+}
+
+html,
+body {
+  background: var(--color-background);
+  color: var(--color-foreground);
+  font-family: var(--font-sans);
+  -webkit-font-smoothing: antialiased;
+}
+
+/* Subtle table row striping */
+.row-striped > *:nth-child(odd) {
+  background: color-mix(in oklab, var(--color-surface) 80%, transparent);
+}
+.row-striped > *:nth-child(even) {
+  background: color-mix(in oklab, var(--color-surface-2) 80%, transparent);
+}

@@ -1,0 +1,55 @@
+name: kartslalom
+
+services:
+  webapp:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: ${PROJECT_NAME}__webapp
+    restart: unless-stopped
+    depends_on:
+      postgres:
+        condition: service_healthy
+    environment:
+      - NODE_ENV=production
+      - DATABASE_URL=postgresql://${POSTGRES_USER}:${POSTGRES_PASSWORD}@${PROJECT_NAME}__postgres:5432/${POSTGRES_DB}
+      - ADMIN_TOKEN=${ADMIN_TOKEN}
+    networks:
+      - proxy
+      - internal
+    labels:
+      - "traefik.enable=true"
+      - "traefik.docker.network=proxy"
+      - "traefik.http.routers.kartslalomweb.rule=Host(`${FQDN}`)"
+      - "traefik.http.routers.kartslalomweb.entrypoints=websecure"
+      - "traefik.http.routers.kartslalomweb.tls=true"
+      - "traefik.http.routers.kartslalomweb.tls.certresolver=le"
+      - "traefik.http.services.kartslalomweb.loadbalancer.server.port=3000"
+
+  postgres:
+    image: postgres:17
+    container_name: ${PROJECT_NAME}__postgres
+    hostname: ${PROJECT_NAME}__postgres
+    restart: unless-stopped
+    environment:
+      - POSTGRES_DB=${POSTGRES_DB}
+      - POSTGRES_USER=${POSTGRES_USER}
+      - POSTGRES_PASSWORD=${POSTGRES_PASSWORD}
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+    networks:
+      - internal
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER} -d ${POSTGRES_DB}"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+volumes:
+  pgdata:
+
+networks:
+  proxy:
+    name: proxy
+    external: true
+  internal:
