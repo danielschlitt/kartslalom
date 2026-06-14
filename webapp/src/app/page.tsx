@@ -28,10 +28,10 @@ export default async function HomePage() {
           hint="HTS · HMJ"
         />
         <QuickLink
-          href="/championship/live"
+          href="/live"
           icon={<Zap className="h-4 w-4" />}
-          label="Live-Meisterschaft"
-          hint="inkl. laufendem Rennen"
+          label="Live-Zeiten"
+          hint="aktuelle Altersklasse"
           accent
         />
         <QuickLink

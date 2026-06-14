@@ -4,6 +4,7 @@ import { Settings, Zap } from "lucide-react";
 
 import {
   getEnrichedEntriesForEvent,
+  getFinalizedAgeClassIds,
   getPointsScale,
   getRaceEvent,
 } from "@/lib/dal/races";
@@ -30,15 +31,17 @@ export default async function RaceEventPage({
   const event = await getRaceEvent(eventId);
   if (!event) notFound();
 
-  const [entries, pointsScale] = await Promise.all([
+  const [entries, pointsScale, finalizedAgeClassIds] = await Promise.all([
     getEnrichedEntriesForEvent(eventId),
     getPointsScale(),
+    getFinalizedAgeClassIds(eventId),
   ]);
 
   // Group entries by age class
   const byClass = new Map<
     number,
     {
+      ageClassId: number;
       sortOrder: number;
       name: string;
       entries: EnrichedEntry[];
@@ -47,7 +50,12 @@ export default async function RaceEventPage({
   for (const e of entries) {
     let g = byClass.get(e.ageClassId);
     if (!g) {
-      g = { sortOrder: e.ageClassSortOrder, name: e.ageClassName, entries: [] };
+      g = {
+        ageClassId: e.ageClassId,
+        sortOrder: e.ageClassSortOrder,
+        name: e.ageClassName,
+        entries: [],
+      };
       byClass.set(e.ageClassId, g);
     }
     g.entries.push(e);
@@ -56,10 +64,10 @@ export default async function RaceEventPage({
     (a, b) => a.sortOrder - b.sortOrder,
   );
 
-  const useStored = event.status === "completed";
+  const isLiveEvent = event.status === "live";
 
   return (
-    <div className="space-y-6" data-poll={event.status === "live" ? "5" : undefined}>
+    <div className="space-y-6">
       <header className="flex flex-wrap items-start justify-between gap-4">
         <div>
           <div className="flex items-center gap-2 text-sm text-[var(--color-muted)]">
@@ -84,6 +92,15 @@ export default async function RaceEventPage({
         </div>
         <div className="flex flex-wrap items-center gap-2">
           <StatusPill status={event.status} />
+          {isLiveEvent && event.liveAgeClassId && (
+            <Link
+              href="/live"
+              className="inline-flex items-center gap-1.5 rounded-md border border-[var(--color-live)]/40 bg-[var(--color-live)]/10 px-3 py-1.5 text-sm text-[var(--color-live)] hover:bg-[var(--color-live)]/15"
+            >
+              <Zap className="h-4 w-4 animate-pulse" />
+              Live-Zeiten
+            </Link>
+          )}
           <Link
             href={`/admin/events/${event.id}`}
             className="inline-flex items-center gap-1.5 rounded-md border border-[var(--color-border)] bg-[var(--color-surface)] px-3 py-1.5 text-sm text-[var(--color-muted)] hover:bg-[var(--color-surface-2)] hover:text-[var(--color-foreground)]"
@@ -103,26 +120,58 @@ export default async function RaceEventPage({
           </p>
         ) : (
           groups.map((g) => {
+            const isFinalized = finalizedAgeClassIds.has(g.ageClassId);
+            const isCurrentlyLive =
+              isLiveEvent && event.liveAgeClassId === g.ageClassId;
+
+            if (isCurrentlyLive) {
+              return (
+                <PendingClassCard
+                  key={g.ageClassId}
+                  ageClassName={g.name}
+                  message="Diese Altersklasse läuft gerade live."
+                  action={
+                    <Link
+                      href="/live"
+                      className="inline-flex items-center gap-1.5 text-sm text-[var(--color-live)] hover:underline"
+                    >
+                      <Zap className="h-4 w-4" />
+                      Live-Zeiten anzeigen →
+                    </Link>
+                  }
+                />
+              );
+            }
+
+            if (!isFinalized) {
+              return (
+                <PendingClassCard
+                  key={g.ageClassId}
+                  ageClassName={g.name}
+                  message="Noch keine Endwertung — Ergebnisse werden nach Abschluss der Altersklasse veröffentlicht."
+                />
+              );
+            }
+
             const ranked = rankRaceEntries(g.entries, pointsScale);
             const highlights = computeHighlights(g.entries);
 
-            const display: RankedEntry<EnrichedEntry>[] = useStored
-              ? ranked
-                  .map((r) => ({
-                    ...r,
-                    finishPosition: r.entry.storedFinishPosition ?? r.finishPosition,
-                    pointsAwarded: r.entry.storedPointsAwarded ?? r.pointsAwarded,
-                  }))
-                  .sort((a, b) => {
-                    const ap = a.finishPosition ?? Number.MAX_SAFE_INTEGER;
-                    const bp = b.finishPosition ?? Number.MAX_SAFE_INTEGER;
-                    return ap - bp;
-                  })
-              : ranked;
+            const display: RankedEntry<EnrichedEntry>[] = ranked
+              .map((r) => ({
+                ...r,
+                finishPosition:
+                  r.entry.storedFinishPosition ?? r.finishPosition,
+                pointsAwarded: r.entry.storedPointsAwarded ?? r.pointsAwarded,
+              }))
+              .sort((a, b) => {
+                const ap = a.finishPosition ?? Number.MAX_SAFE_INTEGER;
+                const bp = b.finishPosition ?? Number.MAX_SAFE_INTEGER;
+                return ap - bp;
+              });
 
             return (
               <StandingsTable
-                key={g.name}
+                key={g.ageClassId}
                 ageClassName={g.name}
                 ranked={display}
                 highlights={highlights}
@@ -132,14 +181,30 @@ export default async function RaceEventPage({
           })
         )}
       </div>
+    </div>
+  );
+}
 
-      {event.status === "live" && (
-        <script
-          dangerouslySetInnerHTML={{
-            __html: `setTimeout(() => location.reload(), 5000);`,
-          }}
-        />
-      )}
+function PendingClassCard({
+  ageClassName,
+  message,
+  action,
+}: {
+  ageClassName: string;
+  message: string;
+  action?: React.ReactNode;
+}) {
+  return (
+    <div className="rounded-lg border border-[var(--color-border)] bg-[var(--color-surface)]">
+      <div className="border-b border-[var(--color-border)] px-4 py-2">
+        <h3 className="text-sm font-semibold tracking-wider text-[var(--color-muted)] uppercase">
+          {ageClassName}
+        </h3>
+      </div>
+      <div className="flex flex-col items-center gap-2 px-4 py-8 text-center text-sm text-[var(--color-muted)]">
+        <p>{message}</p>
+        {action}
+      </div>
     </div>
   );
 }

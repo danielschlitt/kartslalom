@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from "next/server";
-import { eq } from "drizzle-orm";
+import { and, eq, ne } from "drizzle-orm";
 import { db } from "@/db/drizzle";
 import { raceEvents } from "@/db/schema";
 
@@ -21,9 +21,22 @@ export async function PATCH(
     return NextResponse.json({ error: "invalid_status" }, { status: 400 });
   }
 
+  // Only one event may be live at a time.
+  if (status === "live") {
+    await db
+      .update(raceEvents)
+      .set({ status: "upcoming", liveAgeClassId: null })
+      .where(and(eq(raceEvents.status, "live"), ne(raceEvents.id, eventId)));
+  }
+
+  const patch: { status: typeof status; liveAgeClassId?: null } = { status };
+  if (status !== "live") {
+    patch.liveAgeClassId = null;
+  }
+
   const [updated] = await db
     .update(raceEvents)
-    .set({ status })
+    .set(patch)
     .where(eq(raceEvents.id, eventId))
     .returning();
 

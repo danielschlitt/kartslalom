@@ -17,7 +17,7 @@ import { cn } from "@/lib/utils";
 const NAV_ITEMS: { href: string; label: string; icon: LucideIcon }[] = [
   { href: "/", label: "Rennen", icon: Flag },
   { href: "/championship", label: "Meisterschaft", icon: Trophy },
-  { href: "/championship/live", label: "Live", icon: Zap },
+  { href: "/live", label: "Live", icon: Zap },
   { href: "/admin", label: "Admin", icon: Settings },
 ];
 

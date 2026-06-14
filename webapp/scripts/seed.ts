@@ -340,6 +340,19 @@ async function seed() {
     }
   }
 
+  // 8. Mark age classes in completed events (races 1–5) as finalized
+  console.log("Seeding age-class finalizations for races 1–5…");
+  for (let raceNumber = 1; raceNumber <= 5; raceNumber++) {
+    const event = eventByNumber.get(raceNumber);
+    if (!event) continue;
+    for (const ageClassId of ageClassIdByName.values()) {
+      await db
+        .insert(schema.eventAgeClassFinalizations)
+        .values({ raceEventId: event.id, ageClassId })
+        .onConflictDoNothing();
+    }
+  }
+
   // Sanity print
   const counts = await db.execute(sql`
     SELECT

@@ -2,7 +2,7 @@
 
 import { useRouter } from "next/navigation";
 import { useState, useTransition } from "react";
-import { Eye, RefreshCw } from "lucide-react";
+import { Check, Eye, RefreshCw, Zap } from "lucide-react";
 import Link from "next/link";
 
 import { cn, formatDateDe } from "@/lib/utils";
@@ -27,7 +27,9 @@ export interface AdminEntry {
 }
 
 export interface AdminGroup {
+  ageClassId: number;
   name: string;
+  isFinalized: boolean;
   entries: AdminEntry[];
 }
 
@@ -41,6 +43,7 @@ export function AdminEventClient({
     name: string;
     eventDate: string;
     status: "upcoming" | "live" | "completed";
+    liveAgeClassId: number | null;
   };
   groups: AdminGroup[];
 }) {
@@ -57,12 +60,21 @@ export function AdminEventClient({
           <h1 className="text-2xl font-semibold">Admin: {event.name}</h1>
         </div>
         <div className="flex items-center gap-2">
+          {event.status === "live" && event.liveAgeClassId && (
+            <Link
+              href="/live"
+              className="inline-flex items-center gap-1.5 rounded-md border border-[var(--color-live)]/40 bg-[var(--color-live)]/10 px-3 py-1.5 text-sm text-[var(--color-live)] hover:bg-[var(--color-live)]/15"
+            >
+              <Zap className="h-4 w-4 animate-pulse" />
+              Live-Ansicht
+            </Link>
+          )}
           <Link
             href={`/events/${event.id}`}
             className="inline-flex items-center gap-1.5 rounded-md border border-[var(--color-border)] bg-[var(--color-surface)] px-3 py-1.5 text-sm hover:bg-[var(--color-surface-2)]"
           >
             <Eye className="h-4 w-4" />
-            Live-Ansicht
+            Ergebnisse
           </Link>
           <button
             onClick={() => startTransition(() => router.refresh())}
@@ -80,10 +92,22 @@ export function AdminEventClient({
         onChange={() => router.refresh()}
       />
 
+      {event.status === "live" && (
+        <LiveAgeClassControl
+          eventId={event.id}
+          groups={groups}
+          liveAgeClassId={event.liveAgeClassId}
+          onChange={() => router.refresh()}
+        />
+      )}
+
       <div className="space-y-8">
         {groups.map((g) => (
           <AgeClassEditor
-            key={g.name}
+            key={g.ageClassId}
+            eventId={event.id}
+            eventStatus={event.status}
+            liveAgeClassId={event.liveAgeClassId}
             group={g}
             onChange={() => router.refresh()}
           />
@@ -151,10 +175,88 @@ function StatusControl({
   );
 }
 
+function LiveAgeClassControl({
+  eventId,
+  groups,
+  liveAgeClassId,
+  onChange,
+}: {
+  eventId: number;
+  groups: AdminGroup[];
+  liveAgeClassId: number | null;
+  onChange: () => void;
+}) {
+  const [busy, setBusy] = useState<number | null>(null);
+
+  const setLiveClass = async (ageClassId: number | null) => {
+    setBusy(ageClassId ?? -1);
+    try {
+      const res = await fetch(`/api/admin/events/${eventId}/live-age-class`, {
+        method: "PATCH",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ ageClassId }),
+      });
+      if (!res.ok) throw new Error("live age class update failed");
+      onChange();
+    } finally {
+      setBusy(null);
+    }
+  };
+
+  return (
+    <div className="rounded-lg border border-[var(--color-live)]/40 bg-[var(--color-live)]/5 p-3">
+      <div className="mb-2 flex items-center gap-2 text-sm font-medium text-[var(--color-live)]">
+        <Zap className="h-4 w-4" />
+        Aktive Altersklasse (Live)
+      </div>
+      <div className="flex flex-wrap gap-2">
+        {groups.map((g) => (
+          <button
+            key={g.ageClassId}
+            onClick={() => setLiveClass(g.ageClassId)}
+            disabled={busy !== null || g.isFinalized}
+            className={cn(
+              "rounded-md px-3 py-1.5 text-sm",
+              liveAgeClassId === g.ageClassId
+                ? "bg-[var(--color-live)] text-white"
+                : "border border-[var(--color-border)] text-[var(--color-muted)] hover:text-[var(--color-foreground)]",
+              (busy !== null || g.isFinalized) && "opacity-50",
+            )}
+          >
+            {g.name}
+            {g.isFinalized && " ✓"}
+          </button>
+        ))}
+        <button
+          onClick={() => setLiveClass(null)}
+          disabled={busy !== null}
+          className={cn(
+            "rounded-md border border-dashed border-[var(--color-border)] px-3 py-1.5 text-sm text-[var(--color-muted)] hover:text-[var(--color-foreground)]",
+            liveAgeClassId === null && "border-[var(--color-live)]/40 bg-[var(--color-live)]/10",
+            busy !== null && "opacity-50",
+          )}
+        >
+          Keine
+        </button>
+      </div>
+      <p className="mt-2 text-xs text-[var(--color-muted)]">
+        Nur eine Altersklasse ist gleichzeitig live. Nach Abschluss die nächste
+        auswählen und die beendete Klasse finalisieren.
+      </p>
+    </div>
+  );
+}
+
 function AgeClassEditor({
+  eventId,
+  eventStatus,
+  liveAgeClassId,
   group,
   onChange,
 }: {
+  eventId: number;
+  eventStatus: "upcoming" | "live" | "completed";
+  liveAgeClassId: number | null;
   group: AdminGroup;
   onChange: () => void;
 }) {
@@ -167,10 +269,34 @@ function AgeClassEditor({
 
   return (
     <section className="rounded-lg border border-[var(--color-border)] bg-[var(--color-surface)]">
-      <div className="border-b border-[var(--color-border)] px-4 py-2">
-        <h3 className="text-sm font-semibold tracking-wider text-[var(--color-muted)] uppercase">
-          {group.name}
-        </h3>
+      <div className="flex flex-wrap items-center justify-between gap-2 border-b border-[var(--color-border)] px-4 py-2">
+        <div className="flex items-center gap-2">
+          <h3 className="text-sm font-semibold tracking-wider text-[var(--color-muted)] uppercase">
+            {group.name}
+          </h3>
+          {liveAgeClassId === group.ageClassId && (
+            <span className="inline-flex items-center gap-1 rounded-md bg-[var(--color-live)]/15 px-2 py-0.5 text-xs font-semibold text-[var(--color-live)]">
+              <Zap className="h-3 w-3 animate-pulse" />
+              LIVE
+            </span>
+          )}
+          {group.isFinalized && (
+            <span className="inline-flex items-center gap-1 rounded-md bg-[var(--color-rank-grey)]/20 px-2 py-0.5 text-xs font-semibold text-[var(--color-muted)]">
+              <Check className="h-3 w-3" />
+              Finalisiert
+            </span>
+          )}
+        </div>
+        {!group.isFinalized && (
+          <FinalizeButton
+            eventId={eventId}
+            ageClassId={group.ageClassId}
+            disabled={
+              eventStatus === "live" && liveAgeClassId === group.ageClassId
+            }
+            onFinalized={onChange}
+          />
+        )}
       </div>
       <div className="overflow-x-auto">
         <table className="w-full text-sm">
@@ -195,6 +321,77 @@ function AgeClassEditor({
         </table>
       </div>
     </section>
+  );
+}
+
+function FinalizeButton({
+  eventId,
+  ageClassId,
+  disabled,
+  onFinalized,
+}: {
+  eventId: number;
+  ageClassId: number;
+  disabled: boolean;
+  onFinalized: () => void;
+}) {
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+
+  const finalize = async () => {
+    if (
+      !confirm(
+        "Endwertung speichern? Meisterschaftspunkte werden aus den aktuellen Zeiten berechnet und können danach nicht mehr automatisch geändert werden.",
+      )
+    ) {
+      return;
+    }
+    setBusy(true);
+    setError(null);
+    try {
+      const res = await fetch(
+        `/api/admin/events/${eventId}/finalize-age-class`,
+        {
+          method: "POST",
+          headers: { "content-type": "application/json" },
+          body: JSON.stringify({ ageClassId }),
+        },
+      );
+      if (!res.ok) {
+        const data = await res.json().catch(() => ({}));
+        setError(
+          data.error === "age_class_still_live"
+            ? "Altersklasse ist noch live — zuerst andere Klasse auswählen."
+            : "Speichern fehlgeschlagen.",
+        );
+        return;
+      }
+      onFinalized();
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  return (
+    <div className="flex items-center gap-2">
+      {error && <span className="text-xs text-red-400">{error}</span>}
+      <button
+        onClick={finalize}
+        disabled={disabled || busy}
+        title={
+          disabled
+            ? "Altersklasse muss zuerst beendet werden (nicht mehr als live markiert)"
+            : undefined
+        }
+        className={cn(
+          "inline-flex items-center gap-1.5 rounded-md border border-[var(--color-border)] bg-[var(--color-surface-2)] px-3 py-1 text-xs font-medium hover:bg-[var(--color-background)]",
+          (disabled || busy) && "cursor-not-allowed opacity-50",
+        )}
+      >
+        <Check className="h-3.5 w-3.5" />
+        {busy ? "Speichern…" : "Endwertung speichern"}
+      </button>
+    </div>
   );
 }
 

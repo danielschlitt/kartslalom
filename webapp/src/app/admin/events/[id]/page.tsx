@@ -1,5 +1,9 @@
 import { notFound } from "next/navigation";
-import { getEnrichedEntriesForEvent, getRaceEvent } from "@/lib/dal/races";
+import {
+  getEnrichedEntriesForEvent,
+  getFinalizedAgeClassIds,
+  getRaceEvent,
+} from "@/lib/dal/races";
 import { AdminEventClient } from "./admin-event.client";
 
 export const dynamic = "force-dynamic";
@@ -16,12 +20,16 @@ export default async function AdminEventPage({
   const event = await getRaceEvent(eventId);
   if (!event) notFound();
 
-  const entries = await getEnrichedEntriesForEvent(eventId);
+  const [entries, finalizedAgeClassIds] = await Promise.all([
+    getEnrichedEntriesForEvent(eventId),
+    getFinalizedAgeClassIds(eventId),
+  ]);
 
   // Group + sort by age class
   const byClass = new Map<
     number,
     {
+      ageClassId: number;
       sortOrder: number;
       name: string;
       entries: typeof entries;
@@ -30,7 +38,12 @@ export default async function AdminEventPage({
   for (const e of entries) {
     let g = byClass.get(e.ageClassId);
     if (!g) {
-      g = { sortOrder: e.ageClassSortOrder, name: e.ageClassName, entries: [] };
+      g = {
+        ageClassId: e.ageClassId,
+        sortOrder: e.ageClassSortOrder,
+        name: e.ageClassName,
+        entries: [],
+      };
       byClass.set(e.ageClassId, g);
     }
     g.entries.push(e);
@@ -47,9 +60,12 @@ export default async function AdminEventPage({
         number: event.number,
         eventDate: event.eventDate,
         status: event.status,
+        liveAgeClassId: event.liveAgeClassId,
       }}
       groups={groups.map((g) => ({
+        ageClassId: g.ageClassId,
         name: g.name,
+        isFinalized: finalizedAgeClassIds.has(g.ageClassId),
         entries: g.entries.map((e) => ({
           entryId: e.entryId,
           firstName: e.firstName,

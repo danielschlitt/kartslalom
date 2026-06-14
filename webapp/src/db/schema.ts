@@ -79,7 +79,32 @@ export const raceEvents = pgTable("race_events", {
   isHmj: boolean("is_hmj").notNull().default(false),
   kartType: kartTypeEnum("kart_type").notNull(),
   status: eventStatusEnum("status").notNull().default("upcoming"),
+  /** Age class currently running when status is `live`. At most one class live per event. */
+  liveAgeClassId: integer("live_age_class_id").references(() => ageClasses.id, {
+    onDelete: "set null",
+  }),
 });
+
+/** Marks an age class within an event as finalized (championship points stored). */
+export const eventAgeClassFinalizations = pgTable(
+  "event_age_class_finalizations",
+  {
+    id: serial("id").primaryKey(),
+    raceEventId: integer("race_event_id")
+      .notNull()
+      .references(() => raceEvents.id, { onDelete: "cascade" }),
+    ageClassId: integer("age_class_id")
+      .notNull()
+      .references(() => ageClasses.id, { onDelete: "restrict" }),
+    finalizedAt: timestamp("finalized_at").defaultNow().notNull(),
+  },
+  (table) => [
+    unique("event_age_class_finalizations_unique").on(
+      table.raceEventId,
+      table.ageClassId,
+    ),
+  ],
+);
 
 export const raceEntries = pgTable(
   "race_entries",
@@ -156,8 +181,27 @@ export const raceEventsRelations = relations(raceEvents, ({ one, many }) => ({
     fields: [raceEvents.hostTeamId],
     references: [teams.id],
   }),
+  liveAgeClass: one(ageClasses, {
+    fields: [raceEvents.liveAgeClassId],
+    references: [ageClasses.id],
+  }),
   raceEntries: many(raceEntries),
+  ageClassFinalizations: many(eventAgeClassFinalizations),
 }));
+
+export const eventAgeClassFinalizationsRelations = relations(
+  eventAgeClassFinalizations,
+  ({ one }) => ({
+    raceEvent: one(raceEvents, {
+      fields: [eventAgeClassFinalizations.raceEventId],
+      references: [raceEvents.id],
+    }),
+    ageClass: one(ageClasses, {
+      fields: [eventAgeClassFinalizations.ageClassId],
+      references: [ageClasses.id],
+    }),
+  }),
+);
 
 export const raceEntriesRelations = relations(raceEntries, ({ one, many }) => ({
   raceEvent: one(raceEvents, {

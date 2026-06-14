@@ -4,6 +4,7 @@ import { db } from "@/db/drizzle";
 import {
   ageClasses,
   drivers,
+  eventAgeClassFinalizations,
   pointsScale,
   raceEntries,
   raceEvents,
@@ -55,11 +56,33 @@ export async function getAllRaceEvents() {
       isHmj: raceEvents.isHmj,
       kartType: raceEvents.kartType,
       status: raceEvents.status,
+      liveAgeClassId: raceEvents.liveAgeClassId,
       hostTeamName: teams.name,
     })
     .from(raceEvents)
     .leftJoin(teams, eq(teams.id, raceEvents.hostTeamId))
     .orderBy(asc(raceEvents.number));
+}
+
+/** The single event with status `live`, if any. Only one may be live at a time. */
+export async function getLiveEvent() {
+  const rows = await db
+    .select({
+      id: raceEvents.id,
+      number: raceEvents.number,
+      name: raceEvents.name,
+      eventDate: raceEvents.eventDate,
+      isHmj: raceEvents.isHmj,
+      kartType: raceEvents.kartType,
+      status: raceEvents.status,
+      liveAgeClassId: raceEvents.liveAgeClassId,
+      hostTeamName: teams.name,
+    })
+    .from(raceEvents)
+    .leftJoin(teams, eq(teams.id, raceEvents.hostTeamId))
+    .where(eq(raceEvents.status, "live"))
+    .limit(1);
+  return rows[0] ?? null;
 }
 
 export async function getRaceEvent(eventId: number) {
@@ -72,6 +95,7 @@ export async function getRaceEvent(eventId: number) {
       isHmj: raceEvents.isHmj,
       kartType: raceEvents.kartType,
       status: raceEvents.status,
+      liveAgeClassId: raceEvents.liveAgeClassId,
       hostTeamName: teams.name,
     })
     .from(raceEvents)
@@ -79,6 +103,16 @@ export async function getRaceEvent(eventId: number) {
     .where(eq(raceEvents.id, eventId))
     .limit(1);
   return rows[0] ?? null;
+}
+
+export async function getFinalizedAgeClassIds(
+  eventId: number,
+): Promise<Set<number>> {
+  const rows = await db
+    .select({ ageClassId: eventAgeClassFinalizations.ageClassId })
+    .from(eventAgeClassFinalizations)
+    .where(eq(eventAgeClassFinalizations.raceEventId, eventId));
+  return new Set(rows.map((r) => r.ageClassId));
 }
 
 export async function getPointsScale(): Promise<Map<number, number>> {
@@ -207,6 +241,11 @@ export async function getChampionshipDriversWithView(
   );
 
   for (const event of allEvents) {
+    // Live and upcoming events never contribute virtual view overrides — only
+    // stored final scores (written on age-class finalization) count toward
+    // the championship.
+    if (event.status !== "completed") continue;
+
     const entries = await getEnrichedEntriesForEvent(event.id);
     const hasAnyTime = entries.some(
       (e) =>
