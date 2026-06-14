@@ -1,6 +1,11 @@
 import { cn, formatTime } from "@/lib/utils";
 import { RankBadge } from "@/components/rank-badge";
 import { RunCells } from "@/components/run-cell";
+import {
+  stickyBodyBg,
+  stickyDriverClass,
+  stickyRankClass,
+} from "@/components/sticky-table-cols";
 import type {
   EntryHighlights,
   RankedEntry,
@@ -36,8 +41,12 @@ export function StandingsTable({
         <table className="w-full text-sm">
           <thead className="text-xs tracking-wide text-[var(--color-muted)] uppercase">
             <tr className="border-b border-[var(--color-border)]">
-              <th rowSpan={2} className="px-3 py-2 text-left">#</th>
-              <th rowSpan={2} className="px-3 py-2 text-left">Fahrer</th>
+              <th rowSpan={2} className={cn("px-3 py-2 text-left", stickyRankClass({ header: true }))}>
+                #
+              </th>
+              <th rowSpan={2} className={cn("px-3 py-2 text-left", stickyDriverClass({ header: true }))}>
+                Fahrer
+              </th>
               <th rowSpan={2} className="px-3 py-2 text-left">Verein</th>
               <th rowSpan={2} className="px-3 py-2 text-right">Punkte</th>
               {showTestRun && (
@@ -84,14 +93,20 @@ export function StandingsTable({
                     )}
                     style={isHome ? { backgroundColor: HOME_TEAM_BG } : undefined}
                   >
-                    <td className="px-3 py-1.5">
+                    <td
+                      className={cn("px-3 py-1.5", stickyRankClass(), !isHome && "max-md:bg-[var(--color-surface)]")}
+                      style={stickyBodyBg(isHome, HOME_TEAM_BG)}
+                    >
                       {r.finishPosition ? (
                         <RankBadge rank={r.finishPosition} />
                       ) : (
                         <span className="text-xs text-[var(--color-muted)]">—</span>
                       )}
                     </td>
-                    <td className="px-3 py-1.5">
+                    <td
+                      className={cn("px-3 py-1.5", stickyDriverClass(), !isHome && "max-md:bg-[var(--color-surface)]")}
+                      style={stickyBodyBg(isHome, HOME_TEAM_BG)}
+                    >
                       <div className="font-medium">
                         {e.lastName} {e.firstName}
                         {isExtra && (

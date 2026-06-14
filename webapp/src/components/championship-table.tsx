@@ -1,5 +1,10 @@
 import type { ChampionshipRow } from "@/lib/ranking";
 import { RankBadge } from "@/components/rank-badge";
+import {
+  stickyBodyBg,
+  stickyDriverClass,
+  stickyRankClass,
+} from "@/components/sticky-table-cols";
 import { cn } from "@/lib/utils";
 
 /** Local team — its drivers get a tinted row to stand out. */
@@ -29,8 +34,12 @@ export function ChampionshipTable({
         <table className="w-full text-sm">
           <thead className="text-xs tracking-wide text-[var(--color-muted)] uppercase">
             <tr className="border-b border-[var(--color-border)]">
-              <th className="px-3 py-2 text-left">#</th>
-              <th className="px-3 py-2 text-left">Fahrer</th>
+              <th className={cn("px-3 py-2 text-left", stickyRankClass({ header: true }))}>
+                #
+              </th>
+              <th className={cn("px-3 py-2 text-left", stickyDriverClass({ header: true }))}>
+                Fahrer
+              </th>
               <th className="px-3 py-2 text-left">Verein</th>
               <th className="px-3 py-2 text-right">Punkte</th>
               <th className="px-3 py-2 text-right">Starts</th>
@@ -61,10 +70,16 @@ export function ChampionshipTable({
                   className="border-b border-[var(--color-border)]/50 last:border-0"
                   style={isHome ? { backgroundColor: HOME_TEAM_BG } : undefined}
                 >
-                  <td className="px-3 py-2">
+                  <td
+                    className={cn("px-3 py-2", stickyRankClass(), !isHome && "max-md:bg-[var(--color-surface)]")}
+                    style={stickyBodyBg(isHome, HOME_TEAM_BG)}
+                  >
                     <RankBadge rank={r.rank} />
                   </td>
-                  <td className="px-3 py-2 font-medium">
+                  <td
+                    className={cn("px-3 py-2 font-medium", stickyDriverClass(), !isHome && "max-md:bg-[var(--color-surface)]")}
+                    style={stickyBodyBg(isHome, HOME_TEAM_BG)}
+                  >
                     {r.lastName} {r.firstName}
                   </td>
                   <td className="px-3 py-2 text-[var(--color-muted)]">
