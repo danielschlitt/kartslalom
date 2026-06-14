@@ -74,7 +74,7 @@ export function ChampionshipTable({
                     className={cn("px-3 py-2", stickyRankClass(), !isHome && "max-md:bg-[var(--color-surface)]")}
                     style={stickyBodyBg(isHome, HOME_TEAM_BG)}
                   >
-                    <RankBadge rank={r.rank} />
+                    <RankBadge rank={r.rank} isHomeTeam={isHome} />
                   </td>
                   <td
                     className={cn("px-3 py-2 font-medium", stickyDriverClass(), !isHome && "max-md:bg-[var(--color-surface)]")}

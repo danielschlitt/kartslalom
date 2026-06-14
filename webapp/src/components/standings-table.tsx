@@ -98,7 +98,7 @@ export function StandingsTable({
                       style={stickyBodyBg(isHome, HOME_TEAM_BG)}
                     >
                       {r.finishPosition ? (
-                        <RankBadge rank={r.finishPosition} />
+                        <RankBadge rank={r.finishPosition} isHomeTeam={isHome} />
                       ) : (
                         <span className="text-xs text-[var(--color-muted)]">—</span>
                       )}
