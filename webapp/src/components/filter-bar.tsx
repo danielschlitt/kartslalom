@@ -59,11 +59,8 @@ export function FilterBar({
   const drops: "on" | "off" = applyDrops ? "on" : "off";
 
   return (
-    <div className="flex flex-wrap items-center gap-3 rounded-lg border border-[var(--color-border)] bg-[var(--color-surface)] p-3">
-      <div className="flex flex-wrap items-center gap-1">
-        <span className="px-1 text-xs tracking-wider text-[var(--color-muted)] uppercase">
-          Wertung
-        </span>
+    <div className="flex flex-col gap-4 rounded-lg border border-[var(--color-border)] bg-[var(--color-surface)] p-3 md:flex-row md:flex-wrap md:items-center md:gap-3">
+      <FilterGroup label="Wertung">
         {METRICS.map((m) => (
           <Link
             key={m.value}
@@ -78,12 +75,9 @@ export function FilterBar({
             {m.label}
           </Link>
         ))}
-      </div>
-      <div className="h-4 w-px bg-[var(--color-border)]" />
-      <div className="flex flex-wrap items-center gap-1">
-        <span className="px-1 text-xs tracking-wider text-[var(--color-muted)] uppercase">
-          Strafsek.
-        </span>
+      </FilterGroup>
+      <Divider />
+      <FilterGroup label="Strafsek.">
         {PENALTIES.map((p) => (
           <Link
             key={p.value}
@@ -98,12 +92,9 @@ export function FilterBar({
             {p.label}
           </Link>
         ))}
-      </div>
-      <div className="h-4 w-px bg-[var(--color-border)]" />
-      <div className="flex flex-wrap items-center gap-1">
-        <span className="px-1 text-xs tracking-wider text-[var(--color-muted)] uppercase">
-          Streich.
-        </span>
+      </FilterGroup>
+      <Divider />
+      <FilterGroup label="Streich.">
         {DROPS.map((d) => (
           <Link
             key={d.value}
@@ -118,8 +109,36 @@ export function FilterBar({
             {d.label}
           </Link>
         ))}
+      </FilterGroup>
+    </div>
+  );
+}
+
+function FilterGroup({
+  label,
+  children,
+}: {
+  label: string;
+  children: React.ReactNode;
+}) {
+  return (
+    <div className="flex flex-col items-center gap-1.5 md:flex-row md:items-center md:gap-1">
+      <span className="w-full px-1 text-center text-xs tracking-wider text-[var(--color-muted)] uppercase md:w-auto md:text-left">
+        {label}
+      </span>
+      <div className="flex flex-wrap justify-center gap-1 md:justify-start">
+        {children}
       </div>
     </div>
+  );
+}
+
+function Divider() {
+  return (
+    <>
+      <div className="hidden h-4 w-px bg-[var(--color-border)] md:block" />
+      <div className="h-px w-full bg-[var(--color-border)] md:hidden" />
+    </>
   );
 }
 

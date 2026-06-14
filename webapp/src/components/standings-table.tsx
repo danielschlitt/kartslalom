@@ -39,6 +39,7 @@ export function StandingsTable({
               <th rowSpan={2} className="px-3 py-2 text-left">#</th>
               <th rowSpan={2} className="px-3 py-2 text-left">Fahrer</th>
               <th rowSpan={2} className="px-3 py-2 text-left">Verein</th>
+              <th rowSpan={2} className="px-3 py-2 text-right">Punkte</th>
               {showTestRun && (
                 <th colSpan={3} className="border-l border-[var(--color-border)] px-2 py-1 text-center">
                   Testlauf
@@ -53,7 +54,6 @@ export function StandingsTable({
               <th rowSpan={2} className="border-l border-[var(--color-border)] px-3 py-2 text-right">
                 Bestzeit
               </th>
-              <th rowSpan={2} className="px-3 py-2 text-right">Punkte</th>
             </tr>
             <tr className="border-b border-[var(--color-border)] text-[10px]">
               {showTestRun && <SubHeaders />}
@@ -102,6 +102,9 @@ export function StandingsTable({
                       </div>
                     </td>
                     <td className="px-3 py-1.5 text-[var(--color-muted)]">{e.teamName}</td>
+                    <td className="px-3 py-1.5 text-right text-base font-semibold tabular-nums">
+                      {r.pointsAwarded}
+                    </td>
                     {showTestRun && (
                       <RunCells run={e.runs.test} withSeparator />
                     )}
@@ -109,9 +112,6 @@ export function StandingsTable({
                     <RunCells run={e.runs.second} highlight={hl?.second} withSeparator />
                     <td className="border-l border-[var(--color-border)]/40 px-3 py-1.5 text-right font-semibold tabular-nums">
                       {formatTime(bestTotal)}
-                    </td>
-                    <td className="px-3 py-1.5 text-right text-base font-semibold tabular-nums">
-                      {r.pointsAwarded}
                     </td>
                   </tr>
                 );

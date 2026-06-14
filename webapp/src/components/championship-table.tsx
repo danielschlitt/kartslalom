@@ -32,6 +32,7 @@ export function ChampionshipTable({
               <th className="px-3 py-2 text-left">#</th>
               <th className="px-3 py-2 text-left">Fahrer</th>
               <th className="px-3 py-2 text-left">Verein</th>
+              <th className="px-3 py-2 text-right">Punkte</th>
               <th className="px-3 py-2 text-right">Starts</th>
               <th className="px-3 py-2 text-right">Strafsek.</th>
               {raceNumbers.map((n) => (
@@ -39,7 +40,6 @@ export function ChampionshipTable({
                   R{n}
                 </th>
               ))}
-              <th className="px-3 py-2 text-right">Punkte</th>
             </tr>
           </thead>
           <tbody>
@@ -70,6 +70,9 @@ export function ChampionshipTable({
                   <td className="px-3 py-2 text-[var(--color-muted)]">
                     {r.teamName}
                   </td>
+                  <td className="px-3 py-2 text-right text-base font-semibold tabular-nums">
+                    {r.totalPoints}
+                  </td>
                   <td className="px-3 py-2 text-right tabular-nums">
                     {r.startedRaces}
                   </td>
@@ -94,9 +97,6 @@ export function ChampionshipTable({
                       </td>
                     );
                   })}
-                  <td className="px-3 py-2 text-right text-base font-semibold tabular-nums">
-                    {r.totalPoints}
-                  </td>
                 </tr>
                 );
               })
