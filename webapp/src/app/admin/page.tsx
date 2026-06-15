@@ -2,6 +2,7 @@ import Link from "next/link";
 import { ArrowRight, Upload } from "lucide-react";
 import { getAllRaceEvents } from "@/lib/dal/races";
 import { cn, formatDateDe } from "@/lib/utils";
+import { RecomputeButton } from "./recompute-button.client";
 
 export const dynamic = "force-dynamic";
 
@@ -32,6 +33,8 @@ export default async function AdminIndexPage() {
           <ArrowRight className="h-4 w-4 text-[var(--color-muted)]" />
         </Link>
       </div>
+
+      <RecomputeButton />
 
       <section>
         <h2 className="mb-3 text-sm font-semibold tracking-wider text-[var(--color-muted)] uppercase">

@@ -1,6 +1,6 @@
 import Link from "next/link";
 import { notFound } from "next/navigation";
-import { Settings, Zap } from "lucide-react";
+import { BarChart3, Settings, Zap } from "lucide-react";
 
 import {
   getEnrichedEntriesForEvent,
@@ -124,32 +124,40 @@ export default async function RaceEventPage({
             const isCurrentlyLive =
               isLiveEvent && event.liveAgeClassId === g.ageClassId;
 
+            const analysisLink = (
+              <AnalysisLink eventId={event.id} ageClass={g} />
+            );
+
             if (isCurrentlyLive) {
               return (
-                <PendingClassCard
-                  key={g.ageClassId}
-                  ageClassName={g.name}
-                  message="Diese Altersklasse läuft gerade live."
-                  action={
-                    <Link
-                      href="/live"
-                      className="inline-flex items-center gap-1.5 text-sm text-[var(--color-live)] hover:underline"
-                    >
-                      <Zap className="h-4 w-4" />
-                      Live-Zeiten anzeigen →
-                    </Link>
-                  }
-                />
+                <div key={g.ageClassId} className="space-y-2">
+                  {analysisLink}
+                  <PendingClassCard
+                    ageClassName={g.name}
+                    message="Diese Altersklasse läuft gerade live."
+                    action={
+                      <Link
+                        href="/live"
+                        className="inline-flex items-center gap-1.5 text-sm text-[var(--color-live)] hover:underline"
+                      >
+                        <Zap className="h-4 w-4" />
+                        Live-Zeiten anzeigen →
+                      </Link>
+                    }
+                  />
+                </div>
               );
             }
 
             if (!isFinalized) {
               return (
-                <PendingClassCard
-                  key={g.ageClassId}
-                  ageClassName={g.name}
-                  message="Noch keine Endwertung — Ergebnisse werden nach Abschluss der Altersklasse veröffentlicht."
-                />
+                <div key={g.ageClassId} className="space-y-2">
+                  {analysisLink}
+                  <PendingClassCard
+                    ageClassName={g.name}
+                    message="Noch keine Endwertung — Ergebnisse werden nach Abschluss der Altersklasse veröffentlicht."
+                  />
+                </div>
               );
             }
 
@@ -170,18 +178,38 @@ export default async function RaceEventPage({
               });
 
             return (
-              <StandingsTable
-                key={g.ageClassId}
-                ageClassName={g.name}
-                ranked={display}
-                highlights={highlights}
-                showTestRun
-              />
+              <div key={g.ageClassId} className="space-y-2">
+                {analysisLink}
+                <StandingsTable
+                  ageClassName={g.name}
+                  ranked={display}
+                  highlights={highlights}
+                  showTestRun
+                />
+              </div>
             );
           })
         )}
       </div>
     </div>
+  );
+}
+
+function AnalysisLink({
+  eventId,
+  ageClass,
+}: {
+  eventId: number;
+  ageClass: { ageClassId: number; name: string };
+}) {
+  return (
+    <Link
+      href={`/events/${eventId}/details?ageClassId=${ageClass.ageClassId}`}
+      className="inline-flex items-center gap-1.5 text-xs text-[var(--color-muted)] hover:text-[var(--color-foreground)]"
+    >
+      <BarChart3 className="h-3.5 w-3.5" />
+      Analysiere {ageClass.name}
+    </Link>
   );
 }
 

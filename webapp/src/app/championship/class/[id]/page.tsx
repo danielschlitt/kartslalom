@@ -4,16 +4,11 @@ import { notFound } from "next/navigation";
 
 import { ChampionshipTable } from "@/components/championship-table";
 import { seriesSubtitle } from "@/components/championship-subtitle";
-import {
-  FilterBar,
-  parseApplyDrops,
-  parseViewMode,
-} from "@/components/filter-bar";
+import { DropsToggle, parseApplyDrops } from "@/components/drops-toggle";
 import { SeriesTabs, type SeriesParam } from "@/components/series-tabs";
 import {
   getAllAgeClasses,
-  getChampionshipDriversWithView,
-  getCompletedRaceNumbers,
+  getChampionshipDrivers,
   seriesRaceNumbers,
 } from "@/lib/dal/races";
 import { computeChampionship } from "@/lib/ranking";
@@ -27,8 +22,6 @@ export default async function ChampionshipClassPage({
   params: Promise<{ id: string }>;
   searchParams: Promise<{
     series?: string;
-    metric?: string;
-    penalty?: string;
     drops?: string;
   }>;
 }) {
@@ -38,15 +31,13 @@ export default async function ChampionshipClassPage({
 
   const sp = await searchParams;
   const series: SeriesParam = sp.series === "hmj" ? "hmj" : "hts";
-  const view = parseViewMode(sp);
   const applyDrops = parseApplyDrops(sp);
   const raceNumbers = seriesRaceNumbers(series);
   const basePath = `/championship/class/${classId}`;
 
-  const [allClasses, drivers, completedRaceNumbers] = await Promise.all([
+  const [allClasses, drivers] = await Promise.all([
     getAllAgeClasses(),
-    getChampionshipDriversWithView(view),
-    getCompletedRaceNumbers(),
+    getChampionshipDrivers(),
   ]);
 
   const ageClass = allClasses.find((c) => c.id === classId);
@@ -55,7 +46,6 @@ export default async function ChampionshipClassPage({
   const rows = computeChampionship(drivers, {
     series,
     seriesRaceNumbers: raceNumbers,
-    completedRaceNumbers,
     applyDrops,
   }).filter((r) => r.ageClassId === classId);
 
@@ -83,24 +73,13 @@ export default async function ChampionshipClassPage({
         <SeriesTabs
           active={series}
           basePath={basePath}
-          searchParams={{
-            metric: sp.metric,
-            penalty: sp.penalty,
-            drops: sp.drops,
-          }}
+          searchParams={{ drops: sp.drops }}
         />
       </div>
 
-      <FilterBar
+      <DropsToggle
         basePath={basePath}
-        searchParams={{
-          series,
-          metric: sp.metric,
-          penalty: sp.penalty,
-          drops: sp.drops,
-        }}
-        metric={view.metric}
-        penaltyMode={view.penaltyMode}
+        searchParams={{ series, drops: sp.drops }}
         applyDrops={applyDrops}
       />
 
@@ -108,8 +87,9 @@ export default async function ChampionshipClassPage({
         {applyDrops ? (
           <>
             Streichresultate sind{" "}
-            <span className="line-through">durchgestrichen</span>. Nur beendete
-            Rennen werden für Streichergebnisse herangezogen.
+            <span className="line-through">durchgestrichen</span>. Nur
+            finalisierte Altersklassen werden für Streichergebnisse
+            herangezogen.
           </>
         ) : (
           <>Streichergebnisse sind ausgeschaltet — alle Rennen zählen voll.</>

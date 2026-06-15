@@ -1,50 +1,39 @@
 import Link from "next/link";
 import { cn } from "@/lib/utils";
-import type { Metric, PenaltyMode } from "@/lib/ranking";
+import type { Metric, PenaltyMode, ViewMode } from "@/lib/ranking";
 
-const METRICS: { value: Metric; label: string }[] = [
+/**
+ * Analysis filter for the per-event details page. Lets the public explore
+ * how positions would change under different scoring views, without ever
+ * altering the official championship totals.
+ */
+export type AnalysisMetric = Extract<Metric, "best" | "first" | "second">;
+export type AnalysisPenalty = Extract<PenaltyMode, "with" | "without">;
+
+const METRICS: { value: AnalysisMetric; label: string }[] = [
   { value: "best", label: "Bester Lauf" },
-  { value: "sum", label: "Beide Läufe" },
   { value: "first", label: "Nur 1. Lauf" },
   { value: "second", label: "Nur 2. Lauf" },
 ];
 
-const PENALTIES: { value: PenaltyMode; label: string }[] = [
+const PENALTIES: { value: AnalysisPenalty; label: string }[] = [
   { value: "with", label: "mit Strafsek." },
   { value: "without", label: "ohne Strafsek." },
-  { value: "only", label: "nur Strafsek." },
 ];
 
-const DROPS: { value: "on" | "off"; label: string }[] = [
-  { value: "on", label: "an" },
-  { value: "off", label: "aus" },
-];
-
-/**
- * Virtual-view selector that survives via search params. Used on the
- * championship pages to recompute points across events that have run
- * timing data. Events without run times keep their stored points so the
- * filter never destabilises older races.
- */
-export function FilterBar({
+export function EventAnalysisFilterBar({
   basePath,
   searchParams,
   metric,
   penaltyMode,
-  applyDrops,
 }: {
   basePath: string;
   searchParams: Record<string, string | undefined>;
-  metric: Metric;
-  penaltyMode: PenaltyMode;
-  applyDrops: boolean;
+  metric: AnalysisMetric;
+  penaltyMode: AnalysisPenalty;
 }) {
   const buildHref = (
-    next: Partial<{
-      metric: Metric;
-      penalty: PenaltyMode;
-      drops: "on" | "off";
-    }>,
+    next: Partial<{ metric: AnalysisMetric; penalty: AnalysisPenalty }>,
   ) => {
     const sp = new URLSearchParams();
     for (const [k, v] of Object.entries(searchParams)) {
@@ -52,11 +41,8 @@ export function FilterBar({
     }
     if (next.metric) sp.set("metric", next.metric);
     if (next.penalty) sp.set("penalty", next.penalty);
-    if (next.drops) sp.set("drops", next.drops);
     return `${basePath}?${sp.toString()}`;
   };
-
-  const drops: "on" | "off" = applyDrops ? "on" : "off";
 
   return (
     <div className="flex flex-col gap-4 rounded-lg border border-[var(--color-border)] bg-[var(--color-surface)] p-3 md:flex-row md:flex-wrap md:items-center md:gap-3">
@@ -93,23 +79,6 @@ export function FilterBar({
           </Link>
         ))}
       </FilterGroup>
-      <Divider />
-      <FilterGroup label="Streich.">
-        {DROPS.map((d) => (
-          <Link
-            key={d.value}
-            href={buildHref({ drops: d.value })}
-            className={cn(
-              "rounded-md px-2.5 py-1 text-xs",
-              drops === d.value
-                ? "bg-[var(--color-accent)] text-[var(--color-accent-foreground)]"
-                : "text-[var(--color-muted)] hover:text-[var(--color-foreground)]",
-            )}
-          >
-            {d.label}
-          </Link>
-        ))}
-      </FilterGroup>
     </div>
   );
 }
@@ -142,24 +111,15 @@ function Divider() {
   );
 }
 
-export function parseViewMode(searchParams: {
+export function parseAnalysisView(searchParams: {
   metric?: string;
   penalty?: string;
-}): { metric: Metric; penaltyMode: PenaltyMode } {
-  const metric: Metric =
-    searchParams.metric === "first" ||
-    searchParams.metric === "second" ||
-    searchParams.metric === "sum"
+}): ViewMode & { metric: AnalysisMetric; penaltyMode: AnalysisPenalty } {
+  const metric: AnalysisMetric =
+    searchParams.metric === "first" || searchParams.metric === "second"
       ? searchParams.metric
       : "best";
-  const penaltyMode: PenaltyMode =
-    searchParams.penalty === "without" || searchParams.penalty === "only"
-      ? searchParams.penalty
-      : "with";
+  const penaltyMode: AnalysisPenalty =
+    searchParams.penalty === "without" ? "without" : "with";
   return { metric, penaltyMode };
-}
-
-/** Default ON unless URL explicitly opts out via `?drops=off`. */
-export function parseApplyDrops(searchParams: { drops?: string }): boolean {
-  return searchParams.drops !== "off";
 }

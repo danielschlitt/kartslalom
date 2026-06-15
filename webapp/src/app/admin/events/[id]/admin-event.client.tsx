@@ -1,11 +1,12 @@
 "use client";
 
 import { useRouter } from "next/navigation";
-import { useState, useTransition } from "react";
+import { useMemo, useState, useTransition } from "react";
 import { Check, Eye, RefreshCw, Zap } from "lucide-react";
 import Link from "next/link";
 
 import { cn, formatDateDe } from "@/lib/utils";
+import { DEFAULT_VIEW, rankRaceEntries } from "@/lib/ranking";
 
 interface RunValue {
   timeSeconds: number | null;
@@ -344,6 +345,33 @@ function ManualResultsForm({
   entries: AdminEntry[];
   onSaved: () => void;
 }) {
+  const hasScoringTimes = entries.some(
+    (e) =>
+      e.runs.first?.timeSeconds != null || e.runs.second?.timeSeconds != null,
+  );
+
+  // When timings exist, we let the server derive the official positions from
+  // the runs (best run + Strafsekunden). The form then becomes a read-only
+  // preview of what will be written so the admin can sanity-check before
+  // finalizing.
+  const proposed = useMemo(() => {
+    if (!hasScoringTimes) return null;
+    const ranked = rankRaceEntries(
+      entries.map((e) => ({
+        entryId: e.entryId,
+        driverId: e.entryId, // stable tiebreaker; admin entries don't expose driverId, entryId is unique within the class
+        driverType: e.driverType,
+        ageClassId,
+        runs: e.runs,
+      })),
+      new Map(),
+      DEFAULT_VIEW,
+    );
+    const out = new Map<number, number | null>();
+    for (const r of ranked) out.set(r.entry.entryId, r.finishPosition);
+    return out;
+  }, [hasScoringTimes, entries, ageClassId]);
+
   const [positions, setPositions] = useState<Record<number, string>>(() =>
     Object.fromEntries(
       entries.map((e) => [
@@ -355,9 +383,21 @@ function ManualResultsForm({
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
+  const positionFor = (entryId: number): string => {
+    if (proposed) {
+      const p = proposed.get(entryId);
+      return p === null || p === undefined ? "" : String(p);
+    }
+    return positions[entryId] ?? "";
+  };
+
   const sortedForForm = [...entries].sort((a, b) => {
-    const sa = a.storedFinishPosition ?? Number.MAX_SAFE_INTEGER;
-    const sb = b.storedFinishPosition ?? Number.MAX_SAFE_INTEGER;
+    const sa = proposed
+      ? (proposed.get(a.entryId) ?? Number.MAX_SAFE_INTEGER)
+      : (a.storedFinishPosition ?? Number.MAX_SAFE_INTEGER);
+    const sb = proposed
+      ? (proposed.get(b.entryId) ?? Number.MAX_SAFE_INTEGER)
+      : (b.storedFinishPosition ?? Number.MAX_SAFE_INTEGER);
     if (sa !== sb) return sa - sb;
     return a.lastName.localeCompare(b.lastName);
   });
@@ -366,7 +406,10 @@ function ManualResultsForm({
     setPositions((prev) => ({ ...prev, [entryId]: value }));
   };
 
-  const validate = (): { entryId: number; finishPosition: number | null }[] | null => {
+  const validateManual = (): {
+    entryId: number;
+    finishPosition: number | null;
+  }[] | null => {
     const results: { entryId: number; finishPosition: number | null }[] = [];
     const seen = new Set<number>();
     for (const e of entries) {
@@ -392,15 +435,19 @@ function ManualResultsForm({
 
   const save = async () => {
     setError(null);
-    const results = validate();
-    if (!results) return;
-    if (
-      !confirm(
-        `Endwertung für ${ageClassName} speichern? Die Meisterschaftspunkte werden anhand der Positionen vergeben und die Klasse wird finalisiert.`,
-      )
-    ) {
-      return;
+
+    let body: Record<string, unknown> = { ageClassId };
+    if (!hasScoringTimes) {
+      const results = validateManual();
+      if (!results) return;
+      body = { ageClassId, results };
     }
+
+    const confirmText = hasScoringTimes
+      ? `Endwertung für ${ageClassName} aus den eingetragenen Zeiten finalisieren? Positionen und Punkte werden automatisch berechnet (Bester Lauf + Strafsek.).`
+      : `Endwertung für ${ageClassName} speichern? Die Meisterschaftspunkte werden anhand der Positionen vergeben und die Klasse wird finalisiert.`;
+    if (!confirm(confirmText)) return;
+
     setBusy(true);
     try {
       const res = await fetch(
@@ -408,7 +455,7 @@ function ManualResultsForm({
         {
           method: "POST",
           headers: { "content-type": "application/json" },
-          body: JSON.stringify({ ageClassId, results }),
+          body: JSON.stringify(body),
         },
       );
       if (!res.ok) {
@@ -439,10 +486,9 @@ function ManualResultsForm({
       </div>
       <div className="space-y-3 p-4">
         <p className="text-xs text-[var(--color-muted)]">
-          Trage die offiziellen Platzierungen ein. Punkte werden aus der
-          Punktetabelle abgeleitet (nur Meisterschaftsfahrer erhalten Punkte;
-          Vor- und Gaststarter behalten ihre Platzierung, ohne Punkte). Leer
-          lassen = nicht gewertet / DNF.
+          {hasScoringTimes
+            ? "Positionen werden aus den eingetragenen Zeiten berechnet (Bester Lauf + Strafsekunden). Punkte werden anhand der Punktetabelle vergeben (nur Meisterschaftsfahrer; Vor- und Gaststarter ohne Punkte)."
+            : "Trage die offiziellen Platzierungen ein. Punkte werden aus der Punktetabelle abgeleitet (nur Meisterschaftsfahrer erhalten Punkte; Vor- und Gaststarter behalten ihre Platzierung, ohne Punkte). Leer lassen = nicht gewertet / DNF."}
         </p>
         <div className="overflow-x-auto">
           <table className="w-full text-sm">
@@ -475,14 +521,15 @@ function ManualResultsForm({
                       type="number"
                       inputMode="numeric"
                       min={1}
-                      value={positions[e.entryId] ?? ""}
+                      value={positionFor(e.entryId)}
                       onChange={(ev) =>
                         updatePosition(e.entryId, ev.target.value)
                       }
-                      disabled={busy}
+                      disabled={busy || hasScoringTimes}
+                      readOnly={hasScoringTimes}
                       className={cn(
                         "w-16 rounded-md border border-[var(--color-border)] bg-[var(--color-background)] px-2 py-1 text-right text-sm tabular-nums",
-                        busy && "opacity-50",
+                        (busy || hasScoringTimes) && "opacity-60",
                       )}
                       placeholder="—"
                     />
@@ -507,7 +554,11 @@ function ManualResultsForm({
             )}
           >
             <Check className="h-3.5 w-3.5" />
-            {busy ? "Speichern…" : "Endwertung speichern"}
+            {busy
+              ? "Speichern…"
+              : hasScoringTimes
+                ? "Aus Zeiten finalisieren"
+                : "Endwertung speichern"}
           </button>
         </div>
       </div>

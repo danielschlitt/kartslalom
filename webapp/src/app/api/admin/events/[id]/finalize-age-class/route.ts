@@ -10,7 +10,13 @@ import {
   getEnrichedEntriesForEvent,
   getPointsScale,
 } from "@/lib/dal/races";
-import { assignPointsFromManualPositions } from "@/lib/ranking";
+import {
+  DEFAULT_VIEW,
+  assignPointsFromManualPositions,
+  rankRaceEntries,
+  type ManualResult,
+  type RankableEntry,
+} from "@/lib/ranking";
 
 interface ResultInput {
   entryId: number;
@@ -54,10 +60,6 @@ export async function POST(
   if (!Number.isFinite(ageClassId)) {
     return NextResponse.json({ error: "invalid_age_class" }, { status: 400 });
   }
-  const results = parseResults(body?.results);
-  if (!results) {
-    return NextResponse.json({ error: "invalid_results" }, { status: 400 });
-  }
 
   const [event] = await db
     .select()
@@ -98,35 +100,57 @@ export async function POST(
     return NextResponse.json({ error: "no_entries" }, { status: 400 });
   }
 
-  // Every submitted entryId must belong to this class; reject stale forms.
-  const classEntryIds = new Set(classEntries.map((e) => e.entryId));
-  for (const r of results) {
-    if (!classEntryIds.has(r.entryId)) {
-      return NextResponse.json({ error: "invalid_entry" }, { status: 400 });
-    }
-  }
-
-  // Positions must be unique within the class.
-  const seen = new Set<number>();
-  for (const r of results) {
-    if (r.finishPosition === null) continue;
-    if (seen.has(r.finishPosition)) {
-      return NextResponse.json(
-        { error: "duplicate_position" },
-        { status: 400 },
-      );
-    }
-    seen.add(r.finishPosition);
-  }
-
-  const positionsByEntryId = new Map<number, number | null>(
-    results.map((r) => [r.entryId, r.finishPosition] as const),
+  // If timings exist for this class, derive official positions/points from
+  // the runs (best run + penalties). Otherwise fall back to the manual
+  // positions form for legacy backfills (e.g. races 1–5 without run data).
+  const hasScoringTimes = classEntries.some(
+    (e) =>
+      e.runs.first?.timeSeconds != null || e.runs.second?.timeSeconds != null,
   );
-  const assigned = assignPointsFromManualPositions(
-    classEntries,
-    positionsByEntryId,
-    pointsScale,
-  );
+
+  let assigned: ManualResult[];
+
+  if (hasScoringTimes) {
+    const ranked = rankRaceEntries(classEntries, pointsScale, DEFAULT_VIEW);
+    assigned = ranked.map((r) => ({
+      entryId: r.entry.entryId,
+      finishPosition: r.finishPosition,
+      pointsAwarded: r.pointsAwarded,
+    }));
+  } else {
+    const results = parseResults(body?.results);
+    if (!results) {
+      return NextResponse.json({ error: "invalid_results" }, { status: 400 });
+    }
+
+    const classEntryIds = new Set(classEntries.map((e) => e.entryId));
+    for (const r of results) {
+      if (!classEntryIds.has(r.entryId)) {
+        return NextResponse.json({ error: "invalid_entry" }, { status: 400 });
+      }
+    }
+
+    const seen = new Set<number>();
+    for (const r of results) {
+      if (r.finishPosition === null) continue;
+      if (seen.has(r.finishPosition)) {
+        return NextResponse.json(
+          { error: "duplicate_position" },
+          { status: 400 },
+        );
+      }
+      seen.add(r.finishPosition);
+    }
+
+    const positionsByEntryId = new Map<number, number | null>(
+      results.map((r) => [r.entryId, r.finishPosition] as const),
+    );
+    assigned = assignPointsFromManualPositions<RankableEntry>(
+      classEntries,
+      positionsByEntryId,
+      pointsScale,
+    );
+  }
 
   await db.transaction(async (tx) => {
     for (const r of assigned) {
@@ -148,5 +172,6 @@ export async function POST(
   return NextResponse.json({
     ok: true,
     entriesUpdated: assigned.length,
+    source: hasScoringTimes ? "times" : "manual",
   });
 }

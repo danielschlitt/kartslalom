@@ -9,18 +9,20 @@
  *       (or `make seed-db` from the project root)
  */
 import "dotenv/config";
-import { readFileSync } from "node:fs";
-import { join, dirname } from "node:path";
 import { fileURLToPath } from "node:url";
 import { drizzle } from "drizzle-orm/node-postgres";
 import { sql } from "drizzle-orm";
 
 import * as schema from "../src/db/schema";
+import {
+  parseDrivers,
+  parseTeams,
+  readDataFile,
+  resolveDataDir,
+} from "./lib/parse-data";
 
 const __filename = fileURLToPath(import.meta.url);
-// scripts/seed.ts -> webapp/scripts -> webapp -> project root -> data
-const ROOT = dirname(dirname(dirname(__filename)));
-const DATA_DIR = join(ROOT, "data");
+const DATA_DIR = resolveDataDir(__filename);
 
 const databaseUrl = process.env.DATABASE_URL;
 if (!databaseUrl) throw new Error("ENV ERROR - DATABASE_URL is missing");
@@ -57,23 +59,8 @@ interface ParsedEvent {
   kartType: "electric" | "gasoline";
 }
 
-interface ParsedDriver {
-  ageClass: string;
-  firstName: string;
-  lastName: string;
-  teamName: string;
-  positions: number[]; // length 6, 0 = did not participate
-}
-
-function readDataFile(name: string): string[] {
-  return readFileSync(join(DATA_DIR, name), "utf-8")
-    .split(/\r?\n/)
-    .map((l) => l.trim())
-    .filter((l) => l.length > 0);
-}
-
 function parseEvents(): ParsedEvent[] {
-  const lines = readDataFile("race-events.txt");
+  const lines = readDataFile(DATA_DIR, "race-events.txt");
   const re =
     /^(\d{2})\.(\d{2})\.(\d{4})\s*-\s*Race\s*#(\d+):\s*([^()]+?)\s*(?:\(([^)]+)\))?$/i;
   const out: ParsedEvent[] = [];
@@ -96,59 +83,11 @@ function parseEvents(): ParsedEvent[] {
   return out.sort((a, b) => a.number - b.number);
 }
 
-function parseTeams(): string[] {
-  return readDataFile("race-teams.txt");
-}
-
 function parsePoints(): { place: number; points: number }[] {
-  return readDataFile("championship-points.txt").map((line) => {
+  return readDataFile(DATA_DIR, "championship-points.txt").map((line) => {
     const [place, points] = line.split(":").map((s) => s.trim());
     return { place: Number(place), points: Number(points) };
   });
-}
-
-function parseDrivers(): ParsedDriver[] {
-  const lines = readDataFile("race-drivers.txt");
-  const out: ParsedDriver[] = [];
-  // "Altersklasse I - Glatter Jonas - OAMC Reinheim (2, 1, 1, 1, 2)"
-  // "Altersklasse IV - Lorenz Dominik - OAMC Reinheim ()"
-  // "Altersklasse IV - Carl Sarina -"     (no team yet)
-  // "Altersklasse V - "                   (placeholder)
-  const re =
-    /^(Altersklasse\s+[IVX]+)\s*-\s*([^-]+?)\s*-\s*([^()]*?)\s*(?:\(([^)]*)\))?\s*$/;
-  for (const line of lines) {
-    const m = re.exec(line);
-    if (!m) continue;
-    const ageClass = m[1].trim();
-    const fullName = m[2].trim();
-    const teamRaw = m[3].trim();
-    const positionsRaw = (m[4] ?? "").trim();
-
-    if (!fullName || !teamRaw) continue;
-
-    const nameParts = fullName.split(/\s+/);
-    const lastName = nameParts.shift() ?? fullName;
-    const firstName = nameParts.join(" ") || lastName;
-
-    let positions: number[] = [];
-    if (positionsRaw.length > 0) {
-      positions = positionsRaw
-        .split(",")
-        .map((s) => Number(s.trim()))
-        .filter((n) => Number.isFinite(n));
-    }
-    while (positions.length < 6) positions.push(0);
-    positions = positions.slice(0, 6);
-
-    out.push({
-      ageClass,
-      firstName,
-      lastName,
-      teamName: teamRaw,
-      positions,
-    });
-  }
-  return out;
 }
 
 /* ────────────────────────────── seed ────────────────────────────────── */
@@ -156,9 +95,9 @@ function parseDrivers(): ParsedDriver[] {
 async function seed() {
   console.log("Parsing data files…");
   const events = parseEvents();
-  const teamsList = parseTeams();
+  const teamsList = parseTeams(DATA_DIR);
   const points = parsePoints();
-  const drivers = parseDrivers();
+  const drivers = parseDrivers(DATA_DIR);
   console.log(
     `  events=${events.length}, teams=${teamsList.length}, points=${points.length}, drivers=${drivers.length}`,
   );
@@ -238,9 +177,7 @@ async function seed() {
   const supportedDrivers = drivers.filter((d) =>
     SUPPORTED_AGE_CLASSES.has(d.ageClass),
   );
-  console.log(
-    `Seeding ${supportedDrivers.length} drivers (Altersklasse I–III only)…`,
-  );
+  console.log(`Seeding ${supportedDrivers.length} championship drivers…`);
 
   for (const d of supportedDrivers) {
     const teamId = teamIdByName.get(d.teamName);

@@ -13,7 +13,8 @@
     "db:migrate": "drizzle-kit migrate",
     "db:studio": "drizzle-kit studio",
     "db:push": "drizzle-kit push",
-    "db:seed": "tsx scripts/seed.ts"
+    "db:seed": "tsx scripts/seed.ts",
+    "db:fix-names": "tsx scripts/fix-hyphenated-drivers.ts"
   },
   "dependencies": {
     "@radix-ui/react-slot": "^1.2.4",

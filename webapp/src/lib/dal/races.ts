@@ -12,14 +12,22 @@ import {
   teams,
   type runTypeEnum,
 } from "@/db/schema";
+
+async function getAllFinalizationKeys(): Promise<Set<string>> {
+  const rows = await db
+    .select({
+      raceEventId: eventAgeClassFinalizations.raceEventId,
+      ageClassId: eventAgeClassFinalizations.ageClassId,
+    })
+    .from(eventAgeClassFinalizations);
+  return new Set(rows.map((r) => `${r.raceEventId}|${r.ageClassId}`));
+}
 import {
-  rankRaceEntries,
   type EntryRuns,
   type RankableEntry,
   type DriverChampionshipInput,
   type DriverRaceResult,
   type Series,
-  type ViewMode,
 } from "@/lib/ranking";
 
 type RunTypeDb = (typeof runTypeEnum.enumValues)[number];
@@ -219,81 +227,9 @@ export async function getCompletedRaceNumbers(): Promise<number[]> {
 }
 
 /**
- * Recompute championship inputs under a virtual view mode.
- *
- * For each event, if any race entry has a recorded run time we re-rank the
- * field per age class using the chosen view mode. Events without timing
- * data fall back to the stored `points_awarded` so older races (1–5) keep
- * their official results until run times get backfilled.
- */
-export async function getChampionshipDriversWithView(
-  view: ViewMode,
-): Promise<DriverChampionshipInput[]> {
-  const [base, allEvents, scale] = await Promise.all([
-    getChampionshipDrivers(),
-    getAllRaceEvents(),
-    getPointsScale(),
-  ]);
-
-  // Index base results so we can mutate per-driver, per-event point values.
-  const driverIndex = new Map<number, DriverChampionshipInput>(
-    base.map((d) => [d.driverId, d] as const),
-  );
-
-  for (const event of allEvents) {
-    // Live and upcoming events never contribute virtual view overrides — only
-    // stored final scores (written on age-class finalization) count toward
-    // the championship.
-    if (event.status !== "completed") continue;
-
-    const entries = await getEnrichedEntriesForEvent(event.id);
-    const hasAnyTime = entries.some(
-      (e) =>
-        e.runs.first?.timeSeconds != null ||
-        e.runs.second?.timeSeconds != null,
-    );
-    if (!hasAnyTime) continue;
-
-    // Only finalized age classes have an official result; provisional run
-    // times for non-finalized classes must never seep into the championship.
-    const finalizedAgeClassIds = await getFinalizedAgeClassIds(event.id);
-
-    // Group by age class so ranking and points stay class-scoped.
-    const byClass = new Map<number, EnrichedEntry[]>();
-    for (const e of entries) {
-      if (!finalizedAgeClassIds.has(e.ageClassId)) continue;
-      const arr = byClass.get(e.ageClassId) ?? [];
-      arr.push(e);
-      byClass.set(e.ageClassId, arr);
-    }
-
-    const overrides = new Map<number, number>(); // driverId → points
-    for (const classEntries of byClass.values()) {
-      const ranked = rankRaceEntries(classEntries, scale, view);
-      for (const r of ranked) {
-        overrides.set(r.entry.driverId, r.pointsAwarded);
-      }
-    }
-
-    for (const driver of driverIndex.values()) {
-      const result = driver.results.find(
-        (r) => r.raceEventId === event.id,
-      );
-      if (!result) continue;
-      const pts = overrides.get(driver.driverId);
-      if (pts !== undefined) {
-        result.pointsAwarded = pts;
-        result.participated = pts > 0 || result.participated;
-      }
-    }
-  }
-
-  return [...driverIndex.values()];
-}
-
-/**
  * Build per-driver race results across all events. Events with no entry for a
- * driver count as 0 points / not started (but are still droppable).
+ * driver count as 0 points / not started (but are still droppable when the
+ * class was finalized for them).
  */
 export async function getChampionshipDrivers(): Promise<
   DriverChampionshipInput[]
@@ -319,16 +255,19 @@ export async function getChampionshipDrivers(): Promise<
     .innerJoin(teams, eq(teams.id, drivers.teamId))
     .innerJoin(ageClasses, eq(ageClasses.id, drivers.ageClassId));
 
-  const runRows = await db
-    .select({
-      raceEntryId: runs.raceEntryId,
-      raceEventId: raceEntries.raceEventId,
-      driverId: raceEntries.driverId,
-      penaltySeconds: runs.penaltySeconds,
-      runType: runs.runType,
-    })
-    .from(runs)
-    .innerJoin(raceEntries, eq(raceEntries.id, runs.raceEntryId));
+  const [runRows, finalizationKeys] = await Promise.all([
+    db
+      .select({
+        raceEntryId: runs.raceEntryId,
+        raceEventId: raceEntries.raceEventId,
+        driverId: raceEntries.driverId,
+        penaltySeconds: runs.penaltySeconds,
+        runType: runs.runType,
+      })
+      .from(runs)
+      .innerJoin(raceEntries, eq(raceEntries.id, runs.raceEntryId)),
+    getAllFinalizationKeys(),
+  ]);
 
   const penaltyByDriverEvent = new Map<string, number>();
   for (const r of runRows) {
@@ -367,6 +306,7 @@ export async function getChampionshipDrivers(): Promise<
         row.finishPosition !== null && row.finishPosition !== undefined,
       penaltySecondsTotal:
         penaltyByDriverEvent.get(`${row.driverId}|${row.raceEventId}`) ?? 0,
+      finalized: finalizationKeys.has(`${row.raceEventId}|${row.ageClassId}`),
     };
     entry.results.push(result);
   }

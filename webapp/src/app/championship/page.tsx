@@ -1,14 +1,9 @@
 import { ChampionshipTable } from "@/components/championship-table";
 import { seriesSubtitle } from "@/components/championship-subtitle";
-import {
-  FilterBar,
-  parseApplyDrops,
-  parseViewMode,
-} from "@/components/filter-bar";
+import { DropsToggle, parseApplyDrops } from "@/components/drops-toggle";
 import { SeriesTabs, type SeriesParam } from "@/components/series-tabs";
 import {
-  getChampionshipDriversWithView,
-  getCompletedRaceNumbers,
+  getChampionshipDrivers,
   seriesRaceNumbers,
 } from "@/lib/dal/races";
 import { computeChampionship } from "@/lib/ranking";
@@ -20,25 +15,18 @@ export default async function ChampionshipPage({
 }: {
   searchParams: Promise<{
     series?: string;
-    metric?: string;
-    penalty?: string;
     drops?: string;
   }>;
 }) {
   const sp = await searchParams;
   const series: SeriesParam = sp.series === "hmj" ? "hmj" : "hts";
-  const view = parseViewMode(sp);
   const applyDrops = parseApplyDrops(sp);
   const raceNumbers = seriesRaceNumbers(series);
 
-  const [drivers, completedRaceNumbers] = await Promise.all([
-    getChampionshipDriversWithView(view),
-    getCompletedRaceNumbers(),
-  ]);
+  const drivers = await getChampionshipDrivers();
   const rows = computeChampionship(drivers, {
     series,
     seriesRaceNumbers: raceNumbers,
-    completedRaceNumbers,
     applyDrops,
   });
 
@@ -64,24 +52,13 @@ export default async function ChampionshipPage({
         <SeriesTabs
           active={series}
           basePath="/championship"
-          searchParams={{
-            metric: sp.metric,
-            penalty: sp.penalty,
-            drops: sp.drops,
-          }}
+          searchParams={{ drops: sp.drops }}
         />
       </div>
 
-      <FilterBar
+      <DropsToggle
         basePath="/championship"
-        searchParams={{
-          series,
-          metric: sp.metric,
-          penalty: sp.penalty,
-          drops: sp.drops,
-        }}
-        metric={view.metric}
-        penaltyMode={view.penaltyMode}
+        searchParams={{ series, drops: sp.drops }}
         applyDrops={applyDrops}
       />
 
@@ -89,8 +66,9 @@ export default async function ChampionshipPage({
         {applyDrops ? (
           <>
             Streichresultate sind{" "}
-            <span className="line-through">durchgestrichen</span>. Nur beendete
-            Rennen werden für Streichergebnisse herangezogen.
+            <span className="line-through">durchgestrichen</span>. Nur
+            finalisierte Altersklassen werden für Streichergebnisse
+            herangezogen.
           </>
         ) : (
           <>Streichergebnisse sind ausgeschaltet — alle Rennen zählen voll.</>
@@ -115,4 +93,3 @@ export default async function ChampionshipPage({
     </div>
   );
 }
-

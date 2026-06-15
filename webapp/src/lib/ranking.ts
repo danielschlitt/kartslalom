@@ -326,6 +326,13 @@ export interface DriverRaceResult {
   pointsAwarded: number;
   participated: boolean;
   penaltySecondsTotal: number;
+  /**
+   * True when the driver's own age class was officially finalized for this
+   * event (an `event_age_class_finalizations` row exists). Drop eligibility
+   * is per-driver: a race only counts as droppable for a driver once their
+   * class has been finalized, regardless of the overall event status.
+   */
+  finalized: boolean;
 }
 
 export interface DriverChampionshipInput {
@@ -364,11 +371,12 @@ export interface ChampionshipOptions {
   /** Race numbers belonging to the series (used to scope perRace + drops). */
   seriesRaceNumbers: number[];
   /**
-   * Race numbers that are eligible for "Streichergebnis" (drop). Only races
-   * whose event is `completed` should be passed here — upcoming/live races
-   * cannot be dropped because they have not happened yet.
+   * Optional fallback set of race numbers eligible for "Streichergebnis".
+   * When provided, a race is droppable for a driver if either the per-driver
+   * `result.finalized` flag is set _or_ the race number is in this set.
+   * Use this only when per-result finalization data is not available.
    */
-  completedRaceNumbers: readonly number[];
+  completedRaceNumbers?: readonly number[];
   /**
    * When `false`, no Streichergebnisse are applied — every race counts and
    * `totalPoints` sums all per-race points. Defaults to `true`.
@@ -392,10 +400,10 @@ export function computeChampionship(
   drivers: readonly DriverChampionshipInput[],
   options: ChampionshipOptions,
 ): ChampionshipRow[] {
-  const { seriesRaceNumbers, completedRaceNumbers } = options;
+  const { seriesRaceNumbers } = options;
   const applyDrops = options.applyDrops !== false;
   const dropCount = applyDrops ? DROP_COUNT[options.series] : 0;
-  const completedSet = new Set(completedRaceNumbers);
+  const completedSet = new Set(options.completedRaceNumbers ?? []);
 
   const rows: ChampionshipRow[] = drivers
     .filter((d) => d.driverType === "championship")
@@ -414,7 +422,16 @@ export function computeChampionship(
         0,
       );
 
-      const droppable = seriesRaceNumbers.filter((n) => completedSet.has(n));
+      // Drop eligibility is per-driver: a race is droppable when this
+      // driver's age class has been finalized for that event. Falls back to
+      // the legacy completed-event set when finalization metadata isn't
+      // available so old callers keep working.
+      const finalizedRaceNumbers = new Set(
+        seriesResults.filter((r) => r.finalized).map((r) => r.raceNumber),
+      );
+      const droppable = seriesRaceNumbers.filter(
+        (n) => finalizedRaceNumbers.has(n) || completedSet.has(n),
+      );
       const dropped = pickDroppedRaces(droppable, perRace, dropCount);
       const totalPoints = seriesRaceNumbers.reduce((sum, num) => {
         if (dropped.includes(num)) return sum;
