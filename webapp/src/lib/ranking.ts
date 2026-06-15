@@ -324,6 +324,7 @@ export interface DriverRaceResult {
   raceNumber: number;
   isHmj: boolean;
   pointsAwarded: number;
+  finishPosition: number | null;
   participated: boolean;
   penaltySecondsTotal: number;
   /**
@@ -339,6 +340,7 @@ export interface DriverChampionshipInput {
   driverId: number;
   firstName: string;
   lastName: string;
+  teamId: number;
   teamName: string;
   ageClassId: number;
   ageClassName: string;
@@ -511,4 +513,101 @@ function pickDroppedRaces(
     return b - a;
   });
   return ordered.slice(0, Math.min(dropCount, ordered.length)).sort();
+}
+
+/* ────────────────────────────────────────────────────────────────────────── */
+/* Championship progression + per-driver podium helpers                       */
+/* ────────────────────────────────────────────────────────────────────────── */
+
+export interface ChampionshipProgressionPoint {
+  raceNumber: number;
+  raceIndex: number;
+  rank: number | null;
+}
+
+/**
+ * For each race in the series (in chronological order), recompute the
+ * championship standings using only races run up to and including that race.
+ * Returns the per-race rank for every championship driver within their own
+ * age class. Drops are intentionally ignored — the progression should reflect
+ * the running tally, not the dropped totals.
+ *
+ * A race only contributes to the cumulative rank once the driver's age class
+ * has been finalized for that event; before then the entry is `null` so
+ * callers can draw a gap in the line.
+ */
+export function computeChampionshipProgression(
+  drivers: readonly DriverChampionshipInput[],
+  options: Pick<ChampionshipOptions, "series" | "seriesRaceNumbers">,
+): Map<number, ChampionshipProgressionPoint[]> {
+  const out = new Map<number, ChampionshipProgressionPoint[]>();
+  for (const d of drivers) {
+    if (d.driverType !== "championship") continue;
+    out.set(d.driverId, []);
+  }
+
+  // Track per-driver finalization so we only emit a rank once their class is
+  // finalized for that race. Older races without finalization still aggregate
+  // points (so neighbors don't shift), but the driver's own point is null.
+  options.seriesRaceNumbers.forEach((raceNumber, idx) => {
+    const prefix = options.seriesRaceNumbers.slice(0, idx + 1);
+    const rows = computeChampionship(drivers, {
+      series: options.series,
+      seriesRaceNumbers: prefix,
+      applyDrops: false,
+    });
+
+    const finalizedDrivers = new Set<number>();
+    for (const d of drivers) {
+      const hasFinalizedRace = d.results.some(
+        (r) => r.raceNumber === raceNumber && r.finalized,
+      );
+      if (hasFinalizedRace) finalizedDrivers.add(d.driverId);
+    }
+
+    for (const row of rows) {
+      const series = out.get(row.driverId);
+      if (!series) continue;
+      const previous = series[series.length - 1];
+      const isFinalizedNow = finalizedDrivers.has(row.driverId);
+      // Carry the rank forward once a driver's class has been finalized at
+      // least once in the prefix so the line stays continuous on race numbers
+      // where their class isn't run (e.g. HMJ skipping certain rounds).
+      const hadPreviousRank = previous?.rank != null;
+      series.push({
+        raceNumber,
+        raceIndex: idx + 1,
+        rank: isFinalizedNow || hadPreviousRank ? row.rank : null,
+      });
+    }
+  });
+
+  return out;
+}
+
+/** Count finish positions of 1, 2, and 3 across the given results. */
+export function countPodiumFinishes(
+  results: readonly DriverRaceResult[],
+): { wins: number; seconds: number; thirds: number } {
+  let wins = 0;
+  let seconds = 0;
+  let thirds = 0;
+  for (const r of results) {
+    if (r.finishPosition === 1) wins += 1;
+    else if (r.finishPosition === 2) seconds += 1;
+    else if (r.finishPosition === 3) thirds += 1;
+  }
+  return { wins, seconds, thirds };
+}
+
+/** Lowest (best) finish position across the given results, or null. */
+export function bestFinishPosition(
+  results: readonly DriverRaceResult[],
+): number | null {
+  let best: number | null = null;
+  for (const r of results) {
+    if (r.finishPosition == null) continue;
+    if (best === null || r.finishPosition < best) best = r.finishPosition;
+  }
+  return best;
 }

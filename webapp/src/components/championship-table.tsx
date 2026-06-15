@@ -1,3 +1,5 @@
+import Link from "next/link";
+
 import type { ChampionshipRow } from "@/lib/ranking";
 import { RankBadge } from "@/components/rank-badge";
 import {
@@ -80,7 +82,12 @@ export function ChampionshipTable({
                     className={cn("px-3 py-2 font-medium", stickyDriverClass(), !isHome && "max-md:bg-[var(--color-surface)]")}
                     style={stickyBodyBg(isHome, HOME_TEAM_BG)}
                   >
-                    {r.lastName} {r.firstName}
+                    <Link
+                      href={`/driver/${r.driverId}`}
+                      className="hover:underline"
+                    >
+                      {r.lastName} {r.firstName}
+                    </Link>
                   </td>
                   <td className="px-3 py-2 text-[var(--color-muted)]">
                     {r.teamName}

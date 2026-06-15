@@ -245,6 +245,7 @@ export async function getChampionshipDrivers(): Promise<
       driverType: drivers.driverType,
       firstName: drivers.firstName,
       lastName: drivers.lastName,
+      teamId: drivers.teamId,
       teamName: teams.name,
       ageClassId: drivers.ageClassId,
       ageClassName: ageClasses.name,
@@ -287,6 +288,7 @@ export async function getChampionshipDrivers(): Promise<
         driverId: row.driverId,
         firstName: row.firstName,
         lastName: row.lastName,
+        teamId: row.teamId,
         teamName: row.teamName,
         ageClassId: row.ageClassId,
         ageClassName: row.ageClassName,
@@ -301,6 +303,7 @@ export async function getChampionshipDrivers(): Promise<
       raceNumber: row.raceNumber,
       isHmj: row.isHmj,
       pointsAwarded: row.pointsAwarded,
+      finishPosition: row.finishPosition ?? null,
       participated:
         row.pointsAwarded > 0 ||
         row.finishPosition !== null && row.finishPosition !== undefined,
