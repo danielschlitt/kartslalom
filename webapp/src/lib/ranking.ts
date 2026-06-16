@@ -344,6 +344,8 @@ export interface DriverChampionshipInput {
   teamName: string;
   ageClassId: number;
   ageClassName: string;
+  yearOfBirth: number | null;
+  adacId: string | null;
   driverType: DriverType;
   results: DriverRaceResult[];
 }
@@ -384,6 +386,12 @@ export interface ChampionshipOptions {
    * `totalPoints` sums all per-race points. Defaults to `true`.
    */
   applyDrops?: boolean;
+  /**
+   * When set, rank all championship drivers with this birth year in a single
+   * pool instead of bucketing per age class. Drivers without a matching
+   * `yearOfBirth` are excluded.
+   */
+  birthYear?: number;
 }
 
 const DROP_COUNT: Record<Series, number> = { hts: 2, hmj: 1 };
@@ -402,14 +410,18 @@ export function computeChampionship(
   drivers: readonly DriverChampionshipInput[],
   options: ChampionshipOptions,
 ): ChampionshipRow[] {
-  const { seriesRaceNumbers } = options;
+  const { seriesRaceNumbers, birthYear } = options;
   const applyDrops = options.applyDrops !== false;
   const dropCount = applyDrops ? DROP_COUNT[options.series] : 0;
   const completedSet = new Set(options.completedRaceNumbers ?? []);
 
-  const rows: ChampionshipRow[] = drivers
-    .filter((d) => d.driverType === "championship")
-    .map((d) => {
+  const eligible = drivers.filter((d) => {
+    if (d.driverType !== "championship") return false;
+    if (birthYear != null) return d.yearOfBirth === birthYear;
+    return true;
+  });
+
+  const rows: ChampionshipRow[] = eligible.map((d) => {
       const seriesResults = d.results.filter((r) =>
         seriesRaceNumbers.includes(r.raceNumber),
       );
@@ -456,6 +468,30 @@ export function computeChampionship(
         rank: 0,
       };
     });
+
+  if (birthYear != null) {
+    rows.sort((a, b) => {
+      if (b.totalPoints !== a.totalPoints) return b.totalPoints - a.totalPoints;
+      if (b.startedRaces !== a.startedRaces)
+        return b.startedRaces - a.startedRaces;
+      return a.lastName.localeCompare(b.lastName);
+    });
+
+    let i = 0;
+    while (i < rows.length) {
+      let j = i + 1;
+      while (
+        j < rows.length &&
+        rows[j].totalPoints === rows[i].totalPoints &&
+        rows[j].startedRaces === rows[i].startedRaces
+      ) {
+        j += 1;
+      }
+      for (let k = i; k < j; k++) rows[k].rank = i + 1;
+      i = j;
+    }
+    return rows;
+  }
 
   // Bucket by age class, sort + rank within each class, then concatenate.
   const byClass = new Map<number, ChampionshipRow[]>();
@@ -538,11 +574,17 @@ export interface ChampionshipProgressionPoint {
  */
 export function computeChampionshipProgression(
   drivers: readonly DriverChampionshipInput[],
-  options: Pick<ChampionshipOptions, "series" | "seriesRaceNumbers">,
+  options: Pick<ChampionshipOptions, "series" | "seriesRaceNumbers" | "birthYear">,
 ): Map<number, ChampionshipProgressionPoint[]> {
   const out = new Map<number, ChampionshipProgressionPoint[]>();
   for (const d of drivers) {
     if (d.driverType !== "championship") continue;
+    if (
+      options.birthYear != null &&
+      d.yearOfBirth !== options.birthYear
+    ) {
+      continue;
+    }
     out.set(d.driverId, []);
   }
 
@@ -555,6 +597,7 @@ export function computeChampionshipProgression(
       series: options.series,
       seriesRaceNumbers: prefix,
       applyDrops: false,
+      birthYear: options.birthYear,
     });
 
     const finalizedDrivers = new Set<number>();

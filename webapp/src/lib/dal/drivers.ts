@@ -55,10 +55,18 @@ export interface DriverSeriesStats {
   maxPoints: number;
 }
 
+export interface DriverBirthYearStats {
+  /** Championship rank within the birth-year cohort, without Streichergebnisse. */
+  rank: number | null;
+  driverCount: number;
+}
+
 export interface DriverDetails {
   driverId: number;
   firstName: string;
   lastName: string;
+  adacId: string | null;
+  yearOfBirth: number | null;
   teamId: number;
   teamName: string;
   ageClassId: number;
@@ -66,11 +74,16 @@ export interface DriverDetails {
   ageClassDriverCount: number;
   hts: DriverSeriesStats;
   hmj: DriverSeriesStats;
+  birthYear: { hts: DriverBirthYearStats; hmj: DriverBirthYearStats };
   bestFinish: number | null;
   wins: number;
   seconds: number;
   thirds: number;
-  chart: { hts: DriverChartData; hmj: DriverChartData };
+  chart: {
+    hts: DriverChartData;
+    hmj: DriverChartData;
+    birthYear: DriverChartData | null;
+  };
 }
 
 const SERIES_LABEL: Record<Series, string> = {
@@ -112,29 +125,31 @@ function buildChart(
   driver: DriverChampionshipInput,
   allDrivers: DriverChampionshipInput[],
   series: Series,
+  options?: { birthYear?: number },
 ): DriverChartData {
   const seasonRaceNumbers = seriesRaceNumbers(series);
+  const birthYear = options?.birthYear;
 
-  const classDrivers = allDrivers.filter(
-    (d) =>
-      d.ageClassId === driver.ageClassId && d.driverType === "championship",
-  );
+  const cohortDrivers = allDrivers.filter((d) => {
+    if (d.driverType !== "championship") return false;
+    if (birthYear != null) return d.yearOfBirth === birthYear;
+    return d.ageClassId === driver.ageClassId;
+  });
 
-  // Only include races that have actually been driven for this age class —
+  // Only include races that have actually been driven for this cohort —
   // unstarted future races shouldn't widen the X-axis or get a 0-point bump.
   const happenedRaceNumbers = seasonRaceNumbers.filter((n) =>
-    classDrivers.some((d) =>
+    cohortDrivers.some((d) =>
       d.results.some((r) => r.raceNumber === n && r.finalized),
     ),
   );
 
-  // Neighbors come from the live championship standings (which apply drops),
-  // so the chart's red/green lines belong to whoever is currently directly
-  // above / below the driver in the published championship table.
-  const standingsRows = computeChampionship(classDrivers, {
+  // Neighbors come from the latest championship standings without drops.
+  const standingsRows = computeChampionship(cohortDrivers, {
     series,
     seriesRaceNumbers: seasonRaceNumbers,
-    applyDrops: true,
+    applyDrops: false,
+    birthYear,
   });
 
   const driverIndex = standingsRows.findIndex(
@@ -153,9 +168,10 @@ function buildChart(
 
   // Per spec the cumulative line is a pure running sum — each race fully
   // counts, no Streichergebnisse.
-  const progression = computeChampionshipProgression(classDrivers, {
+  const progression = computeChampionshipProgression(cohortDrivers, {
     series,
     seriesRaceNumbers: happenedRaceNumbers,
+    birthYear,
   });
 
   const ranksFor = (driverId: number): (number | null)[] => {
@@ -179,7 +195,7 @@ function buildChart(
     return finishByRaceNumber.get(n) ?? null;
   });
 
-  const driverById = new Map(classDrivers.map((d) => [d.driverId, d]));
+  const driverById = new Map(cohortDrivers.map((d) => [d.driverId, d]));
 
   const lineFor = (row: ChampionshipRow | null): DriverChartLine | null => {
     if (!row) return null;
@@ -200,9 +216,10 @@ function buildChart(
   return {
     series,
     seriesLabel: SERIES_LABEL[series],
-    ageClassName: driver.ageClassName,
+    ageClassName:
+      birthYear != null ? `Jahrgang ${birthYear}` : driver.ageClassName,
     raceNumbers: happenedRaceNumbers,
-    driverCount: classDrivers.length,
+    driverCount: cohortDrivers.length,
     driver: {
       driverId: driver.driverId,
       name: driverDisplayName(driver),
@@ -212,6 +229,25 @@ function buildChart(
     ahead: toLines(aheadRows),
     behind: toLines(behindRows),
   };
+}
+
+function buildBirthYearStats(
+  allDrivers: DriverChampionshipInput[],
+  driverId: number,
+  yearOfBirth: number,
+  series: Series,
+): DriverBirthYearStats {
+  const cohort = allDrivers.filter(
+    (d) => d.driverType === "championship" && d.yearOfBirth === yearOfBirth,
+  );
+  const rows = computeChampionship(cohort, {
+    series,
+    seriesRaceNumbers: seriesRaceNumbers(series),
+    applyDrops: false,
+    birthYear: yearOfBirth,
+  });
+  const row = rows.find((r) => r.driverId === driverId);
+  return { rank: row?.rank ?? null, driverCount: cohort.length };
 }
 
 export async function getDriverDetails(
@@ -256,10 +292,40 @@ export async function getDriverDetails(
       d.ageClassId === driver.ageClassId && d.driverType === "championship",
   ).length;
 
+  const birthYearStats =
+    driver.yearOfBirth != null
+      ? {
+          hts: buildBirthYearStats(
+            allDrivers,
+            driverId,
+            driver.yearOfBirth,
+            "hts",
+          ),
+          hmj: buildBirthYearStats(
+            allDrivers,
+            driverId,
+            driver.yearOfBirth,
+            "hmj",
+          ),
+        }
+      : {
+          hts: { rank: null, driverCount: 0 },
+          hmj: { rank: null, driverCount: 0 },
+        };
+
+  const birthYearChart =
+    driver.yearOfBirth != null
+      ? buildChart(driver, allDrivers, "hts", {
+          birthYear: driver.yearOfBirth,
+        })
+      : null;
+
   return {
     driverId: driver.driverId,
     firstName: driver.firstName,
     lastName: driver.lastName,
+    adacId: driver.adacId,
+    yearOfBirth: driver.yearOfBirth,
     teamId: driver.teamId,
     teamName: driver.teamName,
     ageClassId: driver.ageClassId,
@@ -267,6 +333,7 @@ export async function getDriverDetails(
     ageClassDriverCount,
     hts: buildSeriesStats(htsRowNoDrops, htsRowWithDrops, driver, "hts"),
     hmj: buildSeriesStats(hmjRowNoDrops, hmjRowWithDrops, driver, "hmj"),
+    birthYear: birthYearStats,
     bestFinish,
     wins: podium.wins,
     seconds: podium.seconds,
@@ -274,6 +341,7 @@ export async function getDriverDetails(
     chart: {
       hts: buildChart(driver, allDrivers, "hts"),
       hmj: buildChart(driver, allDrivers, "hmj"),
+      birthYear: birthYearChart,
     },
   };
 }

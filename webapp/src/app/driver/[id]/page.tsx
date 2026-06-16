@@ -19,6 +19,10 @@ function formatPoints(points: number, max: number): string {
   return `${points} / ${max}`;
 }
 
+function formatBirthYearRank(rank: number | null): string {
+  return rank == null ? "—" : `#${rank}`;
+}
+
 export default async function DriverDetailsPage({
   params,
 }: {
@@ -58,6 +62,19 @@ export default async function DriverDetailsPage({
         </p>
       </div>
 
+      <div className="rounded-lg border border-[var(--color-border)] bg-[var(--color-surface)] p-4">
+        <h2 className="mb-3 text-xs font-semibold tracking-wider text-[var(--color-muted)] uppercase">
+          Fahrerdaten
+        </h2>
+        <dl className="grid grid-cols-2 gap-4 sm:grid-cols-2">
+          <InfoItem label="ADAC-ID" value={driver.adacId ?? "—"} />
+          <InfoItem
+            label="Jahrgang"
+            value={driver.yearOfBirth == null ? "—" : String(driver.yearOfBirth)}
+          />
+        </dl>
+      </div>
+
       <p className="text-xs text-[var(--color-muted)]">
         Alle Ergebnisse sind ohne Streicher. Einzig Meisterschaftspositionen
         werden zusätzlich mit Streichern angezeigt. (Streicherergebnis in
@@ -91,6 +108,18 @@ export default async function DriverDetailsPage({
         />
         <Stat label="HTS Starts" value={String(driver.hts.startedRaces)} />
         <Stat label="HMJ Starts" value={String(driver.hmj.startedRaces)} />
+        {driver.yearOfBirth != null ? (
+          <>
+            <Stat
+              label={`Jahrgang HTS (${driver.yearOfBirth})`}
+              value={formatBirthYearRank(driver.birthYear.hts.rank)}
+            />
+            <Stat
+              label={`Jahrgang HMJ (${driver.yearOfBirth})`}
+              value={formatBirthYearRank(driver.birthYear.hmj.rank)}
+            />
+          </>
+        ) : null}
       </div>
 
       <Section title="Verlauf Hessen-Thüringen Süd">
@@ -100,6 +129,14 @@ export default async function DriverDetailsPage({
       <Section title="Verlauf HMJ">
         <DriverChampionshipChart data={driver.chart.hmj} />
       </Section>
+
+      {driver.chart.birthYear ? (
+        <Section
+          title={`Verlauf Jahrgang ${driver.yearOfBirth} (Hessen-Thüringen Süd)`}
+        >
+          <DriverChampionshipChart data={driver.chart.birthYear} />
+        </Section>
+      ) : null}
     </div>
   );
 }
@@ -111,6 +148,17 @@ function Stat({ label, value }: { label: string; value: string }) {
         {label}
       </div>
       <div className="text-2xl font-semibold tabular-nums">{value}</div>
+    </div>
+  );
+}
+
+function InfoItem({ label, value }: { label: string; value: string }) {
+  return (
+    <div>
+      <dt className="text-xs tracking-wider text-[var(--color-muted)] uppercase">
+        {label}
+      </dt>
+      <dd className="mt-1 text-lg font-semibold tabular-nums">{value}</dd>
     </div>
   );
 }

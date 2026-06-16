@@ -55,6 +55,10 @@ export const drivers = pgTable(
     driverType: driverTypeEnum("driver_type")
       .notNull()
       .default("championship"),
+    /** ADAC membership ID — maintained manually in the database. */
+    adacId: text("adac_id"),
+    /** Four-digit birth year — maintained manually in the database. */
+    yearOfBirth: integer("year_of_birth"),
     createdAt: timestamp("created_at").defaultNow().notNull(),
   },
   (table) => [

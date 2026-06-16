@@ -1,0 +1,688 @@
+{
+  "id": "f37dc1a3-643d-4f2b-9fd5-24b5c39f179a",
+  "prevId": "00000000-0000-0000-0000-000000000000",
+  "version": "7",
+  "dialect": "postgresql",
+  "tables": {
+    "public.age_classes": {
+      "name": "age_classes",
+      "schema": "",
+      "columns": {
+        "id": {
+          "name": "id",
+          "type": "serial",
+          "primaryKey": true,
+          "notNull": true
+        },
+        "name": {
+          "name": "name",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "sort_order": {
+          "name": "sort_order",
+          "type": "integer",
+          "primaryKey": false,
+          "notNull": true
+        }
+      },
+      "indexes": {},
+      "foreignKeys": {},
+      "compositePrimaryKeys": {},
+      "uniqueConstraints": {
+        "age_classes_name_unique": {
+          "name": "age_classes_name_unique",
+          "nullsNotDistinct": false,
+          "columns": [
+            "name"
+          ]
+        }
+      },
+      "policies": {},
+      "checkConstraints": {},
+      "isRLSEnabled": false
+    },
+    "public.drivers": {
+      "name": "drivers",
+      "schema": "",
+      "columns": {
+        "id": {
+          "name": "id",
+          "type": "serial",
+          "primaryKey": true,
+          "notNull": true
+        },
+        "first_name": {
+          "name": "first_name",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "last_name": {
+          "name": "last_name",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "team_id": {
+          "name": "team_id",
+          "type": "integer",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "age_class_id": {
+          "name": "age_class_id",
+          "type": "integer",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "driver_type": {
+          "name": "driver_type",
+          "type": "driver_type",
+          "typeSchema": "public",
+          "primaryKey": false,
+          "notNull": true,
+          "default": "'championship'"
+        },
+        "adac_id": {
+          "name": "adac_id",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "year_of_birth": {
+          "name": "year_of_birth",
+          "type": "integer",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "created_at": {
+          "name": "created_at",
+          "type": "timestamp",
+          "primaryKey": false,
+          "notNull": true,
+          "default": "now()"
+        }
+      },
+      "indexes": {
+        "drivers_team_idx": {
+          "name": "drivers_team_idx",
+          "columns": [
+            {
+              "expression": "team_id",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            }
+          ],
+          "isUnique": false,
+          "concurrently": false,
+          "method": "btree",
+          "with": {}
+        },
+        "drivers_age_class_idx": {
+          "name": "drivers_age_class_idx",
+          "columns": [
+            {
+              "expression": "age_class_id",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            }
+          ],
+          "isUnique": false,
+          "concurrently": false,
+          "method": "btree",
+          "with": {}
+        }
+      },
+      "foreignKeys": {
+        "drivers_team_id_teams_id_fk": {
+          "name": "drivers_team_id_teams_id_fk",
+          "tableFrom": "drivers",
+          "tableTo": "teams",
+          "columnsFrom": [
+            "team_id"
+          ],
+          "columnsTo": [
+            "id"
+          ],
+          "onDelete": "restrict",
+          "onUpdate": "no action"
+        },
+        "drivers_age_class_id_age_classes_id_fk": {
+          "name": "drivers_age_class_id_age_classes_id_fk",
+          "tableFrom": "drivers",
+          "tableTo": "age_classes",
+          "columnsFrom": [
+            "age_class_id"
+          ],
+          "columnsTo": [
+            "id"
+          ],
+          "onDelete": "restrict",
+          "onUpdate": "no action"
+        }
+      },
+      "compositePrimaryKeys": {},
+      "uniqueConstraints": {
+        "drivers_name_team_unique": {
+          "name": "drivers_name_team_unique",
+          "nullsNotDistinct": false,
+          "columns": [
+            "first_name",
+            "last_name",
+            "team_id"
+          ]
+        }
+      },
+      "policies": {},
+      "checkConstraints": {},
+      "isRLSEnabled": false
+    },
+    "public.event_age_class_finalizations": {
+      "name": "event_age_class_finalizations",
+      "schema": "",
+      "columns": {
+        "id": {
+          "name": "id",
+          "type": "serial",
+          "primaryKey": true,
+          "notNull": true
+        },
+        "race_event_id": {
+          "name": "race_event_id",
+          "type": "integer",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "age_class_id": {
+          "name": "age_class_id",
+          "type": "integer",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "finalized_at": {
+          "name": "finalized_at",
+          "type": "timestamp",
+          "primaryKey": false,
+          "notNull": true,
+          "default": "now()"
+        }
+      },
+      "indexes": {},
+      "foreignKeys": {
+        "event_age_class_finalizations_race_event_id_race_events_id_fk": {
+          "name": "event_age_class_finalizations_race_event_id_race_events_id_fk",
+          "tableFrom": "event_age_class_finalizations",
+          "tableTo": "race_events",
+          "columnsFrom": [
+            "race_event_id"
+          ],
+          "columnsTo": [
+            "id"
+          ],
+          "onDelete": "cascade",
+          "onUpdate": "no action"
+        },
+        "event_age_class_finalizations_age_class_id_age_classes_id_fk": {
+          "name": "event_age_class_finalizations_age_class_id_age_classes_id_fk",
+          "tableFrom": "event_age_class_finalizations",
+          "tableTo": "age_classes",
+          "columnsFrom": [
+            "age_class_id"
+          ],
+          "columnsTo": [
+            "id"
+          ],
+          "onDelete": "restrict",
+          "onUpdate": "no action"
+        }
+      },
+      "compositePrimaryKeys": {},
+      "uniqueConstraints": {
+        "event_age_class_finalizations_unique": {
+          "name": "event_age_class_finalizations_unique",
+          "nullsNotDistinct": false,
+          "columns": [
+            "race_event_id",
+            "age_class_id"
+          ]
+        }
+      },
+      "policies": {},
+      "checkConstraints": {},
+      "isRLSEnabled": false
+    },
+    "public.points_scale": {
+      "name": "points_scale",
+      "schema": "",
+      "columns": {
+        "place": {
+          "name": "place",
+          "type": "integer",
+          "primaryKey": true,
+          "notNull": true
+        },
+        "points": {
+          "name": "points",
+          "type": "integer",
+          "primaryKey": false,
+          "notNull": true
+        }
+      },
+      "indexes": {},
+      "foreignKeys": {},
+      "compositePrimaryKeys": {},
+      "uniqueConstraints": {},
+      "policies": {},
+      "checkConstraints": {},
+      "isRLSEnabled": false
+    },
+    "public.race_entries": {
+      "name": "race_entries",
+      "schema": "",
+      "columns": {
+        "id": {
+          "name": "id",
+          "type": "serial",
+          "primaryKey": true,
+          "notNull": true
+        },
+        "race_event_id": {
+          "name": "race_event_id",
+          "type": "integer",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "driver_id": {
+          "name": "driver_id",
+          "type": "integer",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "age_class_id": {
+          "name": "age_class_id",
+          "type": "integer",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "starting_order": {
+          "name": "starting_order",
+          "type": "integer",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "finish_position": {
+          "name": "finish_position",
+          "type": "integer",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "points_awarded": {
+          "name": "points_awarded",
+          "type": "integer",
+          "primaryKey": false,
+          "notNull": true,
+          "default": 0
+        },
+        "created_at": {
+          "name": "created_at",
+          "type": "timestamp",
+          "primaryKey": false,
+          "notNull": true,
+          "default": "now()"
+        }
+      },
+      "indexes": {
+        "race_entries_event_idx": {
+          "name": "race_entries_event_idx",
+          "columns": [
+            {
+              "expression": "race_event_id",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            }
+          ],
+          "isUnique": false,
+          "concurrently": false,
+          "method": "btree",
+          "with": {}
+        },
+        "race_entries_driver_idx": {
+          "name": "race_entries_driver_idx",
+          "columns": [
+            {
+              "expression": "driver_id",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            }
+          ],
+          "isUnique": false,
+          "concurrently": false,
+          "method": "btree",
+          "with": {}
+        }
+      },
+      "foreignKeys": {
+        "race_entries_race_event_id_race_events_id_fk": {
+          "name": "race_entries_race_event_id_race_events_id_fk",
+          "tableFrom": "race_entries",
+          "tableTo": "race_events",
+          "columnsFrom": [
+            "race_event_id"
+          ],
+          "columnsTo": [
+            "id"
+          ],
+          "onDelete": "cascade",
+          "onUpdate": "no action"
+        },
+        "race_entries_driver_id_drivers_id_fk": {
+          "name": "race_entries_driver_id_drivers_id_fk",
+          "tableFrom": "race_entries",
+          "tableTo": "drivers",
+          "columnsFrom": [
+            "driver_id"
+          ],
+          "columnsTo": [
+            "id"
+          ],
+          "onDelete": "cascade",
+          "onUpdate": "no action"
+        },
+        "race_entries_age_class_id_age_classes_id_fk": {
+          "name": "race_entries_age_class_id_age_classes_id_fk",
+          "tableFrom": "race_entries",
+          "tableTo": "age_classes",
+          "columnsFrom": [
+            "age_class_id"
+          ],
+          "columnsTo": [
+            "id"
+          ],
+          "onDelete": "restrict",
+          "onUpdate": "no action"
+        }
+      },
+      "compositePrimaryKeys": {},
+      "uniqueConstraints": {
+        "race_entries_event_driver_unique": {
+          "name": "race_entries_event_driver_unique",
+          "nullsNotDistinct": false,
+          "columns": [
+            "race_event_id",
+            "driver_id"
+          ]
+        }
+      },
+      "policies": {},
+      "checkConstraints": {},
+      "isRLSEnabled": false
+    },
+    "public.race_events": {
+      "name": "race_events",
+      "schema": "",
+      "columns": {
+        "id": {
+          "name": "id",
+          "type": "serial",
+          "primaryKey": true,
+          "notNull": true
+        },
+        "number": {
+          "name": "number",
+          "type": "integer",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "event_date": {
+          "name": "event_date",
+          "type": "date",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "name": {
+          "name": "name",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "host_team_id": {
+          "name": "host_team_id",
+          "type": "integer",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "is_hmj": {
+          "name": "is_hmj",
+          "type": "boolean",
+          "primaryKey": false,
+          "notNull": true,
+          "default": false
+        },
+        "kart_type": {
+          "name": "kart_type",
+          "type": "kart_type",
+          "typeSchema": "public",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "status": {
+          "name": "status",
+          "type": "event_status",
+          "typeSchema": "public",
+          "primaryKey": false,
+          "notNull": true,
+          "default": "'upcoming'"
+        },
+        "live_age_class_id": {
+          "name": "live_age_class_id",
+          "type": "integer",
+          "primaryKey": false,
+          "notNull": false
+        }
+      },
+      "indexes": {},
+      "foreignKeys": {
+        "race_events_host_team_id_teams_id_fk": {
+          "name": "race_events_host_team_id_teams_id_fk",
+          "tableFrom": "race_events",
+          "tableTo": "teams",
+          "columnsFrom": [
+            "host_team_id"
+          ],
+          "columnsTo": [
+            "id"
+          ],
+          "onDelete": "restrict",
+          "onUpdate": "no action"
+        },
+        "race_events_live_age_class_id_age_classes_id_fk": {
+          "name": "race_events_live_age_class_id_age_classes_id_fk",
+          "tableFrom": "race_events",
+          "tableTo": "age_classes",
+          "columnsFrom": [
+            "live_age_class_id"
+          ],
+          "columnsTo": [
+            "id"
+          ],
+          "onDelete": "set null",
+          "onUpdate": "no action"
+        }
+      },
+      "compositePrimaryKeys": {},
+      "uniqueConstraints": {
+        "race_events_number_unique": {
+          "name": "race_events_number_unique",
+          "nullsNotDistinct": false,
+          "columns": [
+            "number"
+          ]
+        }
+      },
+      "policies": {},
+      "checkConstraints": {},
+      "isRLSEnabled": false
+    },
+    "public.runs": {
+      "name": "runs",
+      "schema": "",
+      "columns": {
+        "id": {
+          "name": "id",
+          "type": "serial",
+          "primaryKey": true,
+          "notNull": true
+        },
+        "race_entry_id": {
+          "name": "race_entry_id",
+          "type": "integer",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "run_type": {
+          "name": "run_type",
+          "type": "run_type",
+          "typeSchema": "public",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "time_seconds": {
+          "name": "time_seconds",
+          "type": "numeric(8, 3)",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "penalty_seconds": {
+          "name": "penalty_seconds",
+          "type": "integer",
+          "primaryKey": false,
+          "notNull": true,
+          "default": 0
+        },
+        "updated_at": {
+          "name": "updated_at",
+          "type": "timestamp",
+          "primaryKey": false,
+          "notNull": true,
+          "default": "now()"
+        }
+      },
+      "indexes": {},
+      "foreignKeys": {
+        "runs_race_entry_id_race_entries_id_fk": {
+          "name": "runs_race_entry_id_race_entries_id_fk",
+          "tableFrom": "runs",
+          "tableTo": "race_entries",
+          "columnsFrom": [
+            "race_entry_id"
+          ],
+          "columnsTo": [
+            "id"
+          ],
+          "onDelete": "cascade",
+          "onUpdate": "no action"
+        }
+      },
+      "compositePrimaryKeys": {},
+      "uniqueConstraints": {
+        "runs_entry_type_unique": {
+          "name": "runs_entry_type_unique",
+          "nullsNotDistinct": false,
+          "columns": [
+            "race_entry_id",
+            "run_type"
+          ]
+        }
+      },
+      "policies": {},
+      "checkConstraints": {},
+      "isRLSEnabled": false
+    },
+    "public.teams": {
+      "name": "teams",
+      "schema": "",
+      "columns": {
+        "id": {
+          "name": "id",
+          "type": "serial",
+          "primaryKey": true,
+          "notNull": true
+        },
+        "name": {
+          "name": "name",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true
+        }
+      },
+      "indexes": {},
+      "foreignKeys": {},
+      "compositePrimaryKeys": {},
+      "uniqueConstraints": {
+        "teams_name_unique": {
+          "name": "teams_name_unique",
+          "nullsNotDistinct": false,
+          "columns": [
+            "name"
+          ]
+        }
+      },
+      "policies": {},
+      "checkConstraints": {},
+      "isRLSEnabled": false
+    }
+  },
+  "enums": {
+    "public.driver_type": {
+      "name": "driver_type",
+      "schema": "public",
+      "values": [
+        "championship",
+        "vorstarter",
+        "gaststarter"
+      ]
+    },
+    "public.event_status": {
+      "name": "event_status",
+      "schema": "public",
+      "values": [
+        "upcoming",
+        "live",
+        "completed"
+      ]
+    },
+    "public.kart_type": {
+      "name": "kart_type",
+      "schema": "public",
+      "values": [
+        "electric",
+        "gasoline"
+      ]
+    },
+    "public.run_type": {
+      "name": "run_type",
+      "schema": "public",
+      "values": [
+        "test",
+        "first",
+        "second"
+      ]
+    }
+  },
+  "schemas": {},
+  "sequences": {},
+  "roles": {},
+  "policies": {},
+  "views": {},
+  "_meta": {
+    "columns": {},
+    "schemas": {},
+    "tables": {}
+  }
+}

@@ -249,6 +249,8 @@ export async function getChampionshipDrivers(): Promise<
       teamName: teams.name,
       ageClassId: drivers.ageClassId,
       ageClassName: ageClasses.name,
+      yearOfBirth: drivers.yearOfBirth,
+      adacId: drivers.adacId,
     })
     .from(raceEntries)
     .innerJoin(raceEvents, eq(raceEvents.id, raceEntries.raceEventId))
@@ -292,6 +294,8 @@ export async function getChampionshipDrivers(): Promise<
         teamName: row.teamName,
         ageClassId: row.ageClassId,
         ageClassName: row.ageClassName,
+        yearOfBirth: row.yearOfBirth,
+        adacId: row.adacId,
         driverType: row.driverType,
         results: [],
       };
