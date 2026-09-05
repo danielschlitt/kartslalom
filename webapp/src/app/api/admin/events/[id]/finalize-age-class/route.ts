@@ -177,3 +177,40 @@ export async function POST(
     source: hasScoringTimes ? "times" : "manual",
   });
 }
+
+/**
+ * Re-open a finalized age class so times can be corrected (e.g. after a
+ * judge's decision). Stored positions/points are kept until the class is
+ * finalized again, which recomputes them from the corrected times.
+ * Body: `{ ageClassId }`.
+ */
+export async function DELETE(
+  req: NextRequest,
+  { params }: { params: Promise<{ id: string }> },
+) {
+  if (!(await isAdminSession())) return unauthorizedResponse();
+  const { id } = await params;
+  const eventId = Number(id);
+  if (!Number.isFinite(eventId)) {
+    return NextResponse.json({ error: "invalid_id" }, { status: 400 });
+  }
+  const body = await req.json().catch(() => ({}));
+  const ageClassId = Number(body?.ageClassId);
+  if (!Number.isInteger(ageClassId)) {
+    return NextResponse.json({ error: "invalid_age_class" }, { status: 400 });
+  }
+
+  const deleted = await db
+    .delete(eventAgeClassFinalizations)
+    .where(
+      and(
+        eq(eventAgeClassFinalizations.raceEventId, eventId),
+        eq(eventAgeClassFinalizations.ageClassId, ageClassId),
+      ),
+    )
+    .returning({ id: eventAgeClassFinalizations.id });
+  if (deleted.length === 0) {
+    return NextResponse.json({ error: "not_finalized" }, { status: 404 });
+  }
+  return NextResponse.json({ ok: true });
+}

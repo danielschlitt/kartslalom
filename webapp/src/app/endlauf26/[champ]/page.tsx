@@ -133,7 +133,11 @@ function Legend({ championship }: { championship: "hmj" | "adac_hth" }) {
           <span className="rounded-sm px-1" style={{ backgroundColor: "rgba(250,204,21,0.18)", color: "#fde047" }}>
             gleicher Platz
           </span>
-          . Pfeile: Veränderung der Meisterschaftsposition durch den jeweiligen Endlauf.
+          . Pfeile: Veränderung der Meisterschaftsposition durch den jeweiligen Endlauf.{" "}
+          <span className="font-semibold text-[var(--color-live)]">abgemeldet</span> = tritt bei
+          den Endläufen nicht an (nicht gewertet),{" "}
+          <span className="font-semibold text-[var(--color-accent)]">nachnominiert</span> = rückt
+          für einen abgemeldeten Fahrer nach.
         </>
       ) : (
         <>
@@ -141,7 +145,11 @@ function Legend({ championship }: { championship: "hmj" | "adac_hth" }) {
           Alle drei Endläufe sind Pflicht — wer einen (abgeschlossenen) Endlauf auslässt, wird als{" "}
           <span className="font-semibold text-[var(--color-live)]">n. g.</span> geführt. Punktgleich →
           mehr bessere Platzierungen → jüngerer Fahrer → sonst gleicher Platz. Pfeile: Veränderung
-          der Meisterschaftsposition durch den jeweiligen Endlauf.
+          der Meisterschaftsposition durch den jeweiligen Endlauf.{" "}
+          <span className="font-semibold text-[var(--color-live)]">abgemeldet</span> = tritt bei
+          den Endläufen nicht an (nicht gewertet),{" "}
+          <span className="font-semibold text-[var(--color-accent)]">nachnominiert</span> = rückt
+          für einen abgemeldeten Fahrer nach.
         </>
       )}
     </p>

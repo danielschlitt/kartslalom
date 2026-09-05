@@ -70,6 +70,16 @@ export const endlauf26Drivers = pgTable(
     seasonPoints: numeric("season_points", { precision: 7, scale: 2 }),
     /** Number of regular-season races started. */
     seasonRaces: integer("season_races").notNull().default(0),
+    /**
+     * Qualified for the Endläufe according to the official standings list.
+     * Non-qualified drivers are imported too — they form the pool of
+     * replacement candidates (Nachnominierung) and are otherwise invisible.
+     */
+    qualified: boolean("qualified").notNull().default(true),
+    /** Announced before the Endläufe: the driver will not compete at all. Stays in the championship table (flagged), disappears from start lists. */
+    withdrawn: boolean("withdrawn").notNull().default(false),
+    /** Non-qualified driver nominated by hand to fill a vacated spot. Counts like a qualified driver. */
+    nominated: boolean("nominated").notNull().default(false),
     createdAt: timestamp("created_at").defaultNow().notNull(),
   },
   (t) => [

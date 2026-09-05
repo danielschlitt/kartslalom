@@ -12,6 +12,8 @@ import {
   Mic,
   RefreshCw,
   Square,
+  Trash2,
+  Users,
   Zap,
 } from "lucide-react";
 
@@ -21,6 +23,7 @@ import { HOME_TEAM, HOME_TEAM_BG } from "@/lib/endlauf26/home-team";
 import type { EndlaufEntryRuns, EndlaufRunValue } from "@/lib/endlauf26/ranking";
 import { bestRunTotal } from "@/lib/endlauf26/ranking";
 import { cn } from "@/lib/utils";
+import { ResultsSheetImport } from "@/components/results-sheet-import.client";
 
 /* ────────────────────────────── types ────────────────────────────── */
 
@@ -75,6 +78,7 @@ const ERROR_TEXT: Record<string, string> = {
   already_finalized: "Klasse ist bereits abgeschlossen.",
   no_times: "Keine Zeiten vorhanden.",
   missing_api_key: "OPENAI_API_KEY fehlt — Diktat nicht verfügbar.",
+  no_speech: "Keine Sprache erkannt — bitte näher ans Mikrofon und erneut diktieren.",
   upstream_error: "Transkription fehlgeschlagen (OpenAI).",
   upstream_unreachable: "OpenAI nicht erreichbar.",
 };
@@ -96,6 +100,135 @@ function nextEmptyRun(runs: EndlaufEntryRuns): RunType {
   if (!runs.test || runs.test.timeSeconds === null) return "test";
   if (!runs.first || runs.first.timeSeconds === null) return "first";
   return "second";
+}
+
+/** Photo → OCR → bulk import of all times of one class (only while live, not finalized). */
+function SheetImport({
+  event,
+  group,
+  onChange,
+}: {
+  event: AdminEvent;
+  group: AdminGroup;
+  onChange: () => void;
+}) {
+  return (
+    <ResultsSheetImport
+      ocrEndpoint={`/api/endlauf26/events/${event.id}/ocr-results`}
+      importEndpoint={`/api/endlauf26/events/${event.id}/import-runs`}
+      classPayload={{ ageClass: group.ageClass }}
+      classLabel={group.name}
+      entries={group.entries.map((e) => ({
+        entryId: e.entryId,
+        firstName: e.firstName,
+        lastName: e.lastName,
+        teamName: e.teamName,
+        startingOrder: e.startingOrder,
+        runs: e.runs,
+      }))}
+      onImported={onChange}
+    />
+  );
+}
+
+function countRuns(entries: AdminEntry[]): number {
+  return entries.reduce(
+    (n, e) => n + [e.runs.test, e.runs.first, e.runs.second].filter((r) => r?.timeSeconds != null).length,
+    0,
+  );
+}
+
+/** "Alle Zeiten löschen" for one class (live + not finalized only). */
+function ClearClassButton({
+  event,
+  group,
+  onChange,
+  onError,
+}: {
+  event: AdminEvent;
+  group: AdminGroup;
+  onChange: () => void;
+  onError: (m: string) => void;
+}) {
+  const [busy, setBusy] = useState(false);
+  const runCount = countRuns(group.entries);
+  if (event.status !== "live" || group.isFinalized || runCount === 0) return null;
+
+  const clearAll = async () => {
+    if (
+      !confirm(
+        `Wirklich ALLE Zeiten der ${group.name} löschen?\n\n${runCount} Läufe von ${group.entries.length} Fahrern werden entfernt (Training, Lauf 1, Lauf 2). Das kann nicht rückgängig gemacht werden.`,
+      )
+    )
+      return;
+    setBusy(true);
+    try {
+      const r = await apiCall(`/api/endlauf26/events/${event.id}/runs`, {
+        method: "DELETE",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ ageClass: group.ageClass }),
+      });
+      if (!r.ok) onError(r.error);
+      onChange();
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  return (
+    <button
+      onClick={clearAll}
+      disabled={busy}
+      className={cn(
+        "inline-flex items-center gap-1 rounded-md border border-red-500/40 px-2.5 py-1 text-xs text-red-400 hover:bg-red-500/10",
+        busy && "opacity-50",
+      )}
+    >
+      <Trash2 className="h-3.5 w-3.5" /> Alle Zeiten löschen ({runCount})
+    </button>
+  );
+}
+
+/** Trash icon that clears all runs of one driver. */
+function ClearDriverButton({
+  entry,
+  onChange,
+  onError,
+}: {
+  entry: AdminEntry;
+  onChange: () => void;
+  onError: (m: string) => void;
+}) {
+  const [busy, setBusy] = useState(false);
+  if (countRuns([entry]) === 0) return null;
+
+  const clear = async (ev: React.MouseEvent) => {
+    ev.stopPropagation();
+    if (!confirm(`Alle Zeiten von ${entry.lastName} ${entry.firstName} löschen (Training, Lauf 1, Lauf 2)?`))
+      return;
+    setBusy(true);
+    try {
+      const r = await apiCall(`/api/endlauf26/entries/${entry.entryId}/runs`, { method: "DELETE" });
+      if (!r.ok) onError(r.error);
+      onChange();
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  return (
+    <button
+      onClick={clear}
+      disabled={busy}
+      title="Alle Zeiten dieses Fahrers löschen"
+      className={cn(
+        "rounded-md p-1 text-[var(--color-muted)] hover:bg-red-500/10 hover:text-red-400",
+        busy && "opacity-50",
+      )}
+    >
+      <Trash2 className="h-4 w-4" />
+    </button>
+  );
 }
 
 /* ────────────────────────────── root ────────────────────────────── */
@@ -159,6 +292,14 @@ export function AdminEndlaufClient({
             className="inline-flex items-center gap-1.5 rounded-md border border-[var(--color-border)] bg-[var(--color-surface)] px-3 py-1.5 text-sm hover:bg-[var(--color-surface-2)]"
           >
             Alle Endläufe
+          </Link>
+          <Link
+            href={`${basePath}/admin#fahrerfeld`}
+            title="Abmeldungen und Nachnominierungen (gelten für alle Endläufe)"
+            className="inline-flex items-center gap-1.5 rounded-md border border-[var(--color-border)] bg-[var(--color-surface)] px-3 py-1.5 text-sm hover:bg-[var(--color-surface-2)]"
+          >
+            <Users className="h-4 w-4" />
+            Fahrerfeld
           </Link>
           <button
             onClick={refresh}
@@ -433,9 +574,12 @@ function ActiveClassEditor({
               AKTIV
             </span>
           </div>
-          <span className="text-xs text-[var(--color-muted)]">
-            Startreihenfolge von unten nach oben · Zeile anklicken = Fahrer aktivieren
-          </span>
+          <div className="flex items-center gap-3">
+            <span className="text-xs text-[var(--color-muted)]">
+              Startreihenfolge von unten nach oben · Zeile anklicken = Fahrer aktivieren
+            </span>
+            <ClearClassButton event={event} group={group} onChange={onChange} onError={onError} />
+          </div>
         </div>
 
         <DriverPanel
@@ -460,6 +604,7 @@ function ActiveClassEditor({
                 <th className="px-2 py-2 text-right" title="Live-Position nach Lauf 2">Pos L2</th>
                 <th className="px-2 py-2 text-right">Bester</th>
                 <th className="px-2 py-2 text-right" title="Live-Gesamtposition">Pos</th>
+                <th className="px-2 py-2" />
               </tr>
             </thead>
             <tbody>
@@ -527,6 +672,9 @@ function ActiveClassEditor({
                         {e.positionLive ?? "—"}
                       </span>
                     </td>
+                    <td className="px-2 py-1.5 text-right" onClick={(ev) => ev.stopPropagation()}>
+                      <ClearDriverButton entry={e} onChange={onChange} onError={onError} />
+                    </td>
                   </tr>
                 );
               })}
@@ -534,6 +682,8 @@ function ActiveClassEditor({
           </table>
         </div>
       </div>
+
+      {!group.isFinalized && <SheetImport event={event} group={group} onChange={onChange} />}
     </section>
   );
 }
@@ -558,6 +708,7 @@ function DriverPanel({
   const [autoSave, setAutoSave] = useState(true);
   const [busy, setBusy] = useState(false);
   const [lastText, setLastText] = useState<string | null>(null);
+  const [lastNote, setLastNote] = useState<string | null>(null);
   const [proposal, setProposal] = useState<{
     timeSeconds: number | null;
     penaltySeconds: number | null;
@@ -573,6 +724,7 @@ function DriverPanel({
   useEffect(() => {
     setProposal(null);
     setLastText(null);
+    setLastNote(null);
     setQuick("");
     setTarget("auto");
   }, [active?.entryId]);
@@ -610,8 +762,9 @@ function DriverPanel({
   };
 
   const onTranscribed = useCallback(
-    (res: { text: string; timeSeconds: number | null; penaltySeconds: number | null }) => {
+    (res: { text: string; note: string; timeSeconds: number | null; penaltySeconds: number | null }) => {
       setLastText(res.text);
+      setLastNote(res.note || null);
       if (res.timeSeconds === null) {
         setProposal(null);
         onError(`Keine Zeit erkannt: „${res.text}“`);
@@ -737,6 +890,7 @@ function DriverPanel({
               {lastText && (
                 <span className="text-[var(--color-muted)]">
                   Gehört: <em>„{lastText}“</em>
+                  {lastNote && <span className="ml-2 text-xs opacity-80">· {lastNote}</span>}
                 </span>
               )}
               {proposal && (
@@ -789,7 +943,12 @@ function DictationButton({
   onError,
 }: {
   disabled: boolean;
-  onResult: (r: { text: string; timeSeconds: number | null; penaltySeconds: number | null }) => void;
+  onResult: (r: {
+    text: string;
+    note: string;
+    timeSeconds: number | null;
+    penaltySeconds: number | null;
+  }) => void;
   onError: (m: string) => void;
 }) {
   const [state, setState] = useState<"idle" | "recording" | "uploading">("idle");
@@ -832,6 +991,7 @@ function DictationButton({
           }
           onResult({
             text: String(data.text ?? ""),
+            note: typeof data.note === "string" ? data.note : "",
             timeSeconds: typeof data.timeSeconds === "number" ? data.timeSeconds : null,
             penaltySeconds: typeof data.penaltySeconds === "number" ? data.penaltySeconds : null,
           });
@@ -1141,13 +1301,15 @@ function CollapsedClass({
           )}
         </button>
         <div className="flex items-center gap-2">
+          <ClearClassButton event={event} group={group} onChange={onChange} onError={onError} />
           {group.isFinalized ? (
             <button
               onClick={reopen}
               disabled={busy}
+              title="Zeiten wieder editierbar machen, z. B. nach einer Korrektur durch die Rennleitung"
               className="inline-flex items-center gap-1 rounded-md border border-[var(--color-border)] px-2.5 py-1 text-xs text-[var(--color-muted)] hover:text-[var(--color-foreground)]"
             >
-              <LockOpen className="h-3.5 w-3.5" /> Wieder öffnen
+              <LockOpen className="h-3.5 w-3.5" /> Wieder öffnen (Korrektur)
             </button>
           ) : (
             <button
@@ -1209,6 +1371,11 @@ function CollapsedClass({
               ))}
             </tbody>
           </table>
+          {event.status === "live" && !group.isFinalized && (
+            <div className="border-t border-[var(--color-border)] p-3">
+              <SheetImport event={event} group={group} onChange={onChange} />
+            </div>
+          )}
         </div>
       )}
     </div>

@@ -108,3 +108,65 @@ export async function POST(
 
   return NextResponse.json({ ok: true, positions: mine });
 }
+
+/**
+ * Clear all three runs of an entry (Training, Lauf 1, Lauf 2). Requires a
+ * live event and a class that is not finalized; unlike POST it does not need
+ * the entry to be the active driver. Live positions are recomputed.
+ */
+export async function DELETE(
+  _req: NextRequest,
+  { params }: { params: Promise<{ id: string }> },
+) {
+  if (!(await isAdminSession())) return unauthorizedResponse();
+  const { id } = await params;
+  const entryId = Number(id);
+  if (!Number.isFinite(entryId)) {
+    return NextResponse.json({ error: "invalid_id" }, { status: 400 });
+  }
+
+  const [entry] = await db
+    .select()
+    .from(endlauf26Entries)
+    .where(eq(endlauf26Entries.id, entryId))
+    .limit(1);
+  if (!entry) return NextResponse.json({ error: "not_found" }, { status: 404 });
+
+  const [event] = await db
+    .select()
+    .from(endlauf26Events)
+    .where(eq(endlauf26Events.id, entry.eventId))
+    .limit(1);
+  if (!event) return NextResponse.json({ error: "not_found" }, { status: 404 });
+
+  const [fin] = await db
+    .select()
+    .from(endlauf26Finalizations)
+    .where(
+      and(
+        eq(endlauf26Finalizations.eventId, entry.eventId),
+        eq(endlauf26Finalizations.ageClass, entry.ageClass),
+      ),
+    )
+    .limit(1);
+  if (fin) return NextResponse.json({ error: "age_class_finalized" }, { status: 409 });
+  if (event.status !== "live") {
+    return NextResponse.json({ error: "event_not_live" }, { status: 409 });
+  }
+
+  await db
+    .update(endlauf26Entries)
+    .set({
+      testTime: null,
+      testPenalty: 0,
+      run1Time: null,
+      run1Penalty: 0,
+      run2Time: null,
+      run2Penalty: 0,
+      updatedAt: new Date(),
+    })
+    .where(eq(endlauf26Entries.id, entryId));
+
+  await recomputeLivePositions(entry.eventId, entry.ageClass);
+  return NextResponse.json({ ok: true });
+}

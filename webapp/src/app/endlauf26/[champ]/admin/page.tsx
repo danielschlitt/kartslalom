@@ -5,7 +5,11 @@ import { AdminLogin } from "@/components/admin-login.client";
 import { ChampHeader } from "@/components/endlauf26/champ-header";
 import { EventStatusBadge } from "@/components/endlauf26/event-status-badge";
 import { isAdminSession } from "@/lib/admin-auth";
-import { getEndlaufEvents, getFinalizedClasses } from "@/lib/dal/endlauf26";
+import {
+  getEndlaufEvents,
+  getEndlaufFieldDrivers,
+  getFinalizedClasses,
+} from "@/lib/dal/endlauf26";
 import { formatFactor } from "@/lib/endlauf26/format";
 import {
   ageClassName,
@@ -13,6 +17,7 @@ import {
   ENDLAUF26_SLUGS,
 } from "@/lib/endlauf26/ranking";
 import { cn } from "@/lib/utils";
+import { FieldAdmin } from "./field-admin.client";
 import { EndlaufRecomputeButton } from "./recompute-button.client";
 
 export const dynamic = "force-dynamic";
@@ -35,7 +40,10 @@ export default async function EndlaufAdminIndexPage({
     );
   }
 
-  const events = await getEndlaufEvents(championship);
+  const [events, fieldDrivers] = await Promise.all([
+    getEndlaufEvents(championship),
+    getEndlaufFieldDrivers(championship),
+  ]);
   const finalized = await Promise.all(events.map((e) => getFinalizedClasses(e.id)));
   const slug = ENDLAUF26_SLUGS[championship];
   const base = `/endlauf26/${slug}`;
@@ -46,7 +54,7 @@ export default async function EndlaufAdminIndexPage({
         championship={championship}
         active="admin"
         title="Admin · Endläufe"
-        subtitle="Status setzen, Klasse und Fahrer aktivieren, Zeiten diktieren oder eintragen, Klassen abschließen."
+        subtitle="Fahrerfeld pflegen (Abmeldungen, Nachnominierungen), Status setzen, Klasse und Fahrer aktivieren, Zeiten diktieren oder eintragen, Klassen abschließen."
         isLive={events.some((e) => e.status === "live")}
       />
 
@@ -85,6 +93,8 @@ export default async function EndlaufAdminIndexPage({
           ))}
         </div>
       </section>
+
+      <FieldAdmin championship={championship} drivers={fieldDrivers} />
     </div>
   );
 }

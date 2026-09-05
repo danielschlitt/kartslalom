@@ -6,6 +6,11 @@
  * keys; events are upserted by (championship, slug); entries are only
  * inserted when missing so live times are never overwritten.
  *
+ * All drivers of the standings lists are imported. Only the qualified ones
+ * (plus admins' Nachnominierungen) form the Endlauf field and get entries;
+ * the rest stays in the database as the pool of replacement candidates.
+ * The admin flags `withdrawn` / `nominated` are never touched by the seed.
+ *
  * Run:  cd webapp && npm run db:seed-endlauf26
  *       (or `make seed-endlauf26` from the project root)
  */
@@ -14,7 +19,7 @@ import { existsSync, readFileSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { drizzle } from "drizzle-orm/node-postgres";
-import { and, eq, sql } from "drizzle-orm";
+import { and, eq, or, sql } from "drizzle-orm";
 
 import * as schema from "../src/db/schema";
 import {
@@ -149,6 +154,7 @@ async function upsertDriver(
     seasonPosition: s.driver.position,
     seasonPoints: String(s.driver.total),
     seasonRaces: s.driver.racesStarted,
+    qualified: s.driver.qualified,
   };
   const [row] = await db
     .insert(schema.endlauf26Drivers)
@@ -160,6 +166,7 @@ async function upsertDriver(
         schema.endlauf26Drivers.lastName,
         schema.endlauf26Drivers.teamId,
       ],
+      // `withdrawn` / `nominated` are admin decisions — deliberately not reset.
       set: {
         ageClass: values.ageClass,
         verband: values.verband,
@@ -168,6 +175,7 @@ async function upsertDriver(
         seasonPosition: values.seasonPosition,
         seasonPoints: values.seasonPoints,
         seasonRaces: values.seasonRaces,
+        qualified: values.qualified,
       },
     })
     .returning({ id: schema.endlauf26Drivers.id });
@@ -210,8 +218,9 @@ async function seedEvents(championship: Endlauf26Championship) {
 }
 
 /**
- * Create the entry list of every event: all drivers of the championship,
- * starting order bottom-up (worst pre-Endlauf standing starts first).
+ * Create the entry list of every event: every driver of the Endlauf field
+ * (qualified or nominated), starting order bottom-up (worst pre-Endlauf
+ * standing starts first).
  */
 async function seedEntries(championship: Endlauf26Championship) {
   const drivers = await db
@@ -228,9 +237,19 @@ async function seedEntries(championship: Endlauf26Championship) {
       seasonPosition: schema.endlauf26Drivers.seasonPosition,
       seasonPoints: schema.endlauf26Drivers.seasonPoints,
       seasonRaces: schema.endlauf26Drivers.seasonRaces,
+      withdrawn: schema.endlauf26Drivers.withdrawn,
+      nominated: schema.endlauf26Drivers.nominated,
     })
     .from(schema.endlauf26Drivers)
-    .where(eq(schema.endlauf26Drivers.championship, championship));
+    .where(
+      and(
+        eq(schema.endlauf26Drivers.championship, championship),
+        or(
+          eq(schema.endlauf26Drivers.qualified, true),
+          eq(schema.endlauf26Drivers.nominated, true),
+        ),
+      ),
+    );
 
   const seasonRows = await db
     .select()
@@ -261,6 +280,8 @@ async function seedEntries(championship: Endlauf26Championship) {
     seasonPosition: d.seasonPosition,
     seasonPoints: d.seasonPoints === null ? null : Number(d.seasonPoints),
     seasonRaces: d.seasonRaces,
+    withdrawn: d.withdrawn,
+    nominated: d.nominated,
     seasonResults: (seasonByDriver.get(d.id) ?? []).map((r) => ({
       raceNumber: r.endlauf26_season_results.raceNumber,
       finishPosition: r.endlauf26_season_results.finishPosition,
@@ -330,29 +351,32 @@ async function seed() {
   console.log(`Seeding hmj (Stand ${hmj.stand})…`);
   {
     const teamIdByName = new Map<string, number>();
-    let count = 0;
+    let qualified = 0;
+    let reserve = 0;
     for (const c of hmj.classes) {
       for (const d of c.drivers) {
-        if (!d.qualified) continue;
         await upsertDriver(
           { championship: "hmj", ageClass: c.number, driver: d, region: null },
           teamIdByName,
         );
-        count += 1;
+        if (d.qualified) qualified += 1;
+        else reserve += 1;
       }
     }
-    console.log(`  ${count} qualified drivers, ${teamIdByName.size} clubs`);
+    console.log(
+      `  ${qualified} qualified drivers, ${reserve} replacement candidates, ${teamIdByName.size} clubs`,
+    );
   }
 
   // adac-hth
   console.log("Seeding adac-hth…");
   {
     const teamIdByName = new Map<string, number>();
-    let count = 0;
+    let qualified = 0;
+    let reserve = 0;
     for (const region of adac.regions) {
       for (const c of region.classes) {
         for (const d of c.drivers) {
-          if (!d.qualified) continue;
           await upsertDriver(
             {
               championship: "adac_hth",
@@ -362,12 +386,15 @@ async function seed() {
             },
             teamIdByName,
           );
-          count += 1;
+          if (d.qualified) qualified += 1;
+          else reserve += 1;
         }
       }
       console.log(`  Region ${region.region} (Stand ${region.stand})`);
     }
-    console.log(`  ${count} qualified drivers, ${teamIdByName.size} clubs`);
+    console.log(
+      `  ${qualified} qualified drivers, ${reserve} replacement candidates, ${teamIdByName.size} clubs`,
+    );
   }
 
   console.log("Seeding Endlauf events…");

@@ -7,13 +7,14 @@ export const runtime = "nodejs";
 
 /**
  * Whisper's `prompt` is NOT an instruction — it is treated as preceding
- * transcript text and only steers spelling/style. Instruction-like prompts
- * ("Beispiele: …") get echoed back verbatim whenever Whisper hears silence or
- * noise, which is exactly the "Beispiele 2,5. Beispiele 2,5." loop we saw.
- * So: a short, realistic sample of what a dictation sounds like, nothing else.
+ * transcript text and only steers spelling/vocabulary. Whenever Whisper hears
+ * silence or noise it tends to echo the prompt back verbatim (that was the
+ * "Beispiele 2,5. Beispiele 2,5." loop). Therefore the prompt must contain
+ * domain vocabulary only and NO numbers: an echoed prompt then can never be
+ * mistaken for a real lap time by the extraction stage.
  */
 const WHISPER_STYLE_PROMPT =
-  "Zweiundvierzig Komma drei fünf, zwei Strafsekunden. Einundvierzig Komma acht, keine Fehler. Korrektur, die Zeit ist vierzig Komma neun sieben.";
+  "Kartslalom Zeitnahme: Laufzeit in Sekunden mit Komma, dazu Strafsekunden, Fehler, Pylonen, Tore oder eine Korrektur.";
 
 /** Uploads smaller than this cannot contain a spoken lap time. */
 const MIN_AUDIO_BYTES = 1500;
@@ -141,12 +142,15 @@ function detectSilence(
     }
   }
 
-  // 2. Echo of our style prompt (Whisper repeats prompt text on silence).
+  // 2. Echo of our style prompt (Whisper repeats prompt text on silence):
+  //    the whole transcript is a fragment of the prompt, or the prompt (with
+  //    or without the leading label) is repeated.
   const norm = (s: string) => s.toLowerCase().replace(/[^\p{L}\p{N}]+/gu, " ").trim();
-  const promptSentences = WHISPER_STYLE_PROMPT.split(/[.!?]+/).map(norm).filter(Boolean);
+  const normPrompt = norm(WHISPER_STYLE_PROMPT);
   const normText = norm(text);
-  const echoed = promptSentences.filter((s) => s.length > 12 && normText.includes(s)).length;
-  if (echoed >= 2) return "prompt_echo";
+  if (normText.length >= 8 && normPrompt.includes(normText)) return "prompt_echo";
+  const promptCore = norm(WHISPER_STYLE_PROMPT.replace(/^[^:]*:/, ""));
+  if (promptCore.length > 12 && normText.split(promptCore).length - 1 >= 2) return "prompt_echo";
 
   // 3. Degenerate repetition ("Beispiele 2,5. Beispiele 2,5. …").
   const sentences = text.split(/[.!?]+/).map(norm).filter(Boolean);

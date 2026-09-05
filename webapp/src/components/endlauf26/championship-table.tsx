@@ -138,12 +138,27 @@ export function EndlaufChampionshipTable({
                         {r.lastName} {r.firstName}
                       </>
                     )}
-                    {r.excluded && (
+                    {r.withdrawn ? (
+                      <span
+                        className="ml-2 rounded-sm bg-[var(--color-live)]/15 px-1 py-0.5 text-[10px] font-semibold text-[var(--color-live)] uppercase"
+                        title="Abgemeldet — tritt bei den Endläufen nicht an, nicht gewertet"
+                      >
+                        abgemeldet
+                      </span>
+                    ) : r.excluded ? (
                       <span
                         className="ml-2 rounded-sm bg-[var(--color-live)]/15 px-1 py-0.5 text-[10px] font-semibold text-[var(--color-live)] uppercase"
                         title="Nicht alle Endläufe bestritten — nicht gewertet"
                       >
                         n. g.
+                      </span>
+                    ) : null}
+                    {r.nominated && (
+                      <span
+                        className="ml-2 rounded-sm bg-[var(--color-accent)]/15 px-1 py-0.5 text-[10px] font-semibold text-[var(--color-accent)] uppercase"
+                        title="Nachnominiert — rückt für einen abgemeldeten Fahrer nach"
+                      >
+                        nachnominiert
                       </span>
                     )}
                   </td>

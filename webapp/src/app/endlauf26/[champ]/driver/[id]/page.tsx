@@ -53,7 +53,12 @@ export default async function EndlaufDriverPage({
       />
 
       <div className="grid grid-cols-2 gap-3 sm:grid-cols-4">
-        <Stat label="Platz" value={row.excluded ? "n. g." : row.rank ? `${row.rank}.` : "—"} />
+        <Stat
+          label="Platz"
+          value={
+            row.withdrawn ? "abgemeldet" : row.excluded ? "n. g." : row.rank ? `${row.rank}.` : "—"
+          }
+        />
         <Stat label="Punkte" value={formatPoints(row.totalPoints)} />
         <Stat label="Vor Endlauf" value={row.rankBefore ? `${row.rankBefore}.` : "—"} />
         <Stat

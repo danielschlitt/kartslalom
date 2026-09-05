@@ -28,7 +28,7 @@ Regeln:
 - Wenn nur eine Dezimalzahl und eine kleine ganze Zahl genannt werden ("42,35 2"), ist die Dezimalzahl die Zeit und die ganze Zahl die Strafsekunden.
 - Ignoriere Füllwörter, Namen, Startnummern und alles, was keine Zeit oder Strafe ist.
 - Erfinde nichts. Wenn das Transkript keine erkennbare Zeitansage enthält (z. B. Stille, Rauschen, wiederholte Phrasen), gib timeSeconds = null und penaltySeconds = null zurück.
-- note: maximal ein kurzer deutscher Satz, z. B. "Korrektur der Zeit übernommen." oder "Keine Zeit erkannt.".`;
+- note: Normalerweise ein leerer String "". Nur wenn etwas Erwähnenswertes passiert ist, ein kurzer deutscher Hinweis: bei einer Korrektur "Korrektur übernommen.", bei fehlender Zeit "Keine Zeit erkannt.", bei Mehrdeutigkeit ein kurzer Hinweis darauf.`;
 
 const RESPONSE_SCHEMA = {
   name: "lap_time",

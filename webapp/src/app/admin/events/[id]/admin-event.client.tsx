@@ -1,12 +1,36 @@
 "use client";
 
 import { useRouter } from "next/navigation";
-import { useMemo, useState, useTransition } from "react";
-import { Check, Eye, RefreshCw, Zap } from "lucide-react";
+import { useCallback, useEffect, useMemo, useState, useTransition } from "react";
+import { AlertTriangle, Check, Eye, LockOpen, RefreshCw, Trash2, Zap } from "lucide-react";
 import Link from "next/link";
 
 import { cn, formatDateDe } from "@/lib/utils";
 import { DEFAULT_VIEW, rankRaceEntries } from "@/lib/ranking";
+import { ResultsSheetImport } from "@/components/results-sheet-import.client";
+
+const ERROR_TEXT: Record<string, string> = {
+  unauthorized: "Nicht als Admin freigeschaltet — Seite neu laden und Admin-Token eingeben.",
+  age_class_finalized:
+    "Klasse ist finalisiert — zum Korrigieren zuerst „Wieder öffnen“, dann Zeiten ändern und erneut finalisieren.",
+  not_finalized: "Klasse ist nicht finalisiert.",
+  age_class_still_live: "Altersklasse ist noch live — zuerst andere Klasse auswählen.",
+  invalid_time: "Ungültige Zeit.",
+  invalid_penalty: "Ungültige Strafsekunden.",
+};
+
+async function apiCall(
+  url: string,
+  init: RequestInit,
+): Promise<{ ok: true; data: Record<string, unknown> } | { ok: false; error: string }> {
+  const res = await fetch(url, init);
+  const data = (await res.json().catch(() => ({}))) as Record<string, unknown>;
+  if (!res.ok) {
+    const code = typeof data.error === "string" ? data.error : "unknown";
+    return { ok: false, error: ERROR_TEXT[code] ?? `Fehler (${code}).` };
+  }
+  return { ok: true, data };
+}
 
 interface RunValue {
   timeSeconds: number | null;
@@ -52,9 +76,20 @@ export function AdminEventClient({
 }) {
   const router = useRouter();
   const [pending, startTransition] = useTransition();
+  const [flash, setFlash] = useState<string | null>(null);
+  const showError = useCallback((msg: string) => {
+    setFlash(msg);
+    setTimeout(() => setFlash(null), 6000);
+  }, []);
 
   return (
     <div className="space-y-6">
+      {flash && (
+        <div className="sticky top-2 z-30 flex items-start gap-2 rounded-md border border-red-500/40 bg-red-500/10 px-3 py-2 text-sm text-red-300 backdrop-blur">
+          <AlertTriangle className="mt-0.5 h-4 w-4 shrink-0" />
+          {flash}
+        </div>
+      )}
       <header className="flex flex-wrap items-start justify-between gap-3">
         <div>
           <div className="text-sm text-[var(--color-muted)]">
@@ -113,6 +148,7 @@ export function AdminEventClient({
             liveAgeClassId={event.liveAgeClassId}
             group={g}
             onChange={() => router.refresh()}
+            onError={showError}
           />
         ))}
         {groups.length === 0 && (
@@ -256,12 +292,14 @@ function AgeClassEditor({
   liveAgeClassId,
   group,
   onChange,
+  onError,
 }: {
   eventId: number;
   eventStatus: "upcoming" | "live" | "completed";
   liveAgeClassId: number | null;
   group: AdminGroup;
   onChange: () => void;
+  onError: (msg: string) => void;
 }) {
   const sorted = [...group.entries].sort((a, b) => {
     const ao = a.startingOrder ?? Number.MAX_SAFE_INTEGER;
@@ -272,6 +310,53 @@ function AgeClassEditor({
 
   const isCurrentlyLive =
     eventStatus === "live" && liveAgeClassId === group.ageClassId;
+  const runCount = group.entries.reduce(
+    (n, e) => n + [e.runs.test, e.runs.first, e.runs.second].filter(Boolean).length,
+    0,
+  );
+  const [busy, setBusy] = useState(false);
+
+  const reopen = async () => {
+    if (
+      !confirm(
+        `${group.name} wieder öffnen?\n\nDie Zeiten werden wieder editierbar (z. B. nach einer Korrektur durch die Rennleitung). Platzierungen und Punkte bleiben bis zur erneuten Finalisierung unverändert — danach „Aus Zeiten finalisieren“ klicken, damit alles neu berechnet wird.`,
+      )
+    )
+      return;
+    setBusy(true);
+    try {
+      const r = await apiCall(`/api/admin/events/${eventId}/finalize-age-class`, {
+        method: "DELETE",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ ageClassId: group.ageClassId }),
+      });
+      if (!r.ok) onError(r.error);
+      onChange();
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  const clearAll = async () => {
+    if (
+      !confirm(
+        `Wirklich ALLE Zeiten der ${group.name} löschen?\n\n${runCount} Läufe von ${group.entries.length} Fahrern werden entfernt (Training, Lauf 1, Lauf 2). Das kann nicht rückgängig gemacht werden.`,
+      )
+    )
+      return;
+    setBusy(true);
+    try {
+      const r = await apiCall(`/api/admin/events/${eventId}/runs`, {
+        method: "DELETE",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ ageClassId: group.ageClassId }),
+      });
+      if (!r.ok) onError(r.error);
+      onChange();
+    } finally {
+      setBusy(false);
+    }
+  };
 
   return (
     <section className="space-y-4">
@@ -294,7 +379,42 @@ function AgeClassEditor({
               </span>
             )}
           </div>
+          <div className="flex items-center gap-2">
+            {group.isFinalized ? (
+              <button
+                onClick={reopen}
+                disabled={busy}
+                title="Zeiten wieder editierbar machen, z. B. nach einer Korrektur durch die Rennleitung"
+                className={cn(
+                  "inline-flex items-center gap-1 rounded-md border border-[var(--color-border)] px-2.5 py-1 text-xs text-[var(--color-muted)] hover:text-[var(--color-foreground)]",
+                  busy && "opacity-50",
+                )}
+              >
+                <LockOpen className="h-3.5 w-3.5" /> Wieder öffnen (Korrektur)
+              </button>
+            ) : (
+              runCount > 0 && (
+                <button
+                  onClick={clearAll}
+                  disabled={busy}
+                  className={cn(
+                    "inline-flex items-center gap-1 rounded-md border border-red-500/40 px-2.5 py-1 text-xs text-red-400 hover:bg-red-500/10",
+                    busy && "opacity-50",
+                  )}
+                >
+                  <Trash2 className="h-3.5 w-3.5" /> Alle Zeiten löschen ({runCount})
+                </button>
+              )
+            )}
+          </div>
         </div>
+        {group.isFinalized && (
+          <p className="border-b border-[var(--color-border)] px-4 py-2 text-xs text-[var(--color-muted)]">
+            Zeiten sind gesperrt. Für eine Korrektur die Klasse wieder öffnen, Zeiten ändern
+            (oder per Foto neu einlesen) und anschließend erneut „Aus Zeiten finalisieren“ —
+            Platzierungen und Punkte werden dann neu berechnet.
+          </p>
+        )}
         <div className="overflow-x-auto">
           <table className="w-full text-sm">
             <thead className="text-xs tracking-wide text-[var(--color-muted)] uppercase">
@@ -308,16 +428,42 @@ function AgeClassEditor({
                 <th className="px-2 py-2 text-right">L1 +s</th>
                 <th className="px-2 py-2 text-right">L2 Zeit</th>
                 <th className="px-2 py-2 text-right">L2 +s</th>
+                <th className="px-2 py-2" />
               </tr>
             </thead>
             <tbody>
               {sorted.map((e) => (
-                <EntryRow key={e.entryId} entry={e} onChange={onChange} />
+                <EntryRow
+                  key={e.entryId}
+                  entry={e}
+                  locked={group.isFinalized}
+                  onChange={onChange}
+                  onError={onError}
+                />
               ))}
             </tbody>
           </table>
         </div>
       </div>
+
+      {/* Live: read the posted sheet; completed + re-opened: correct from a photo. */}
+      {eventStatus !== "upcoming" && !group.isFinalized && (
+        <ResultsSheetImport
+          ocrEndpoint={`/api/admin/events/${eventId}/ocr-results`}
+          importEndpoint={`/api/admin/events/${eventId}/import-runs`}
+          classPayload={{ ageClassId: group.ageClassId }}
+          classLabel={group.name}
+          entries={sorted.map((e) => ({
+            entryId: e.entryId,
+            firstName: e.firstName,
+            lastName: e.lastName,
+            teamName: e.teamName,
+            startingOrder: e.startingOrder,
+            runs: e.runs,
+          }))}
+          onImported={onChange}
+        />
+      )}
 
       {!group.isFinalized && !isCurrentlyLive && (
         <ManualResultsForm
@@ -568,11 +714,36 @@ function ManualResultsForm({
 
 function EntryRow({
   entry,
+  locked,
   onChange,
+  onError,
 }: {
   entry: AdminEntry;
+  locked: boolean;
   onChange: () => void;
+  onError: (msg: string) => void;
 }) {
+  const [busy, setBusy] = useState(false);
+  const hasRuns = !!(entry.runs.test || entry.runs.first || entry.runs.second);
+
+  const clearDriver = async () => {
+    if (
+      !confirm(
+        `Alle Zeiten von ${entry.lastName} ${entry.firstName} löschen (Training, Lauf 1, Lauf 2)?`,
+      )
+    )
+      return;
+    setBusy(true);
+    try {
+      const r = await apiCall(`/api/admin/entries/${entry.entryId}/runs`, { method: "DELETE" });
+      if (!r.ok) onError(r.error);
+      onChange();
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  const common = { entryId: entry.entryId, disabled: locked || busy, onSaved: onChange, onError };
   return (
     <tr className="border-b border-[var(--color-border)]/50 last:border-0">
       <td className="px-2 py-1.5">
@@ -587,9 +758,24 @@ function EntryRow({
         )}
       </td>
       <td className="px-3 py-1.5 text-[var(--color-muted)]">{entry.teamName}</td>
-      <RunInput entryId={entry.entryId} runType="test" run={entry.runs.test} onSaved={onChange} />
-      <RunInput entryId={entry.entryId} runType="first" run={entry.runs.first} onSaved={onChange} />
-      <RunInput entryId={entry.entryId} runType="second" run={entry.runs.second} onSaved={onChange} />
+      <RunInput {...common} runType="test" run={entry.runs.test} />
+      <RunInput {...common} runType="first" run={entry.runs.first} />
+      <RunInput {...common} runType="second" run={entry.runs.second} />
+      <td className="px-2 py-1.5 text-right">
+        {hasRuns && !locked && (
+          <button
+            onClick={clearDriver}
+            disabled={busy}
+            title="Alle Zeiten dieses Fahrers löschen"
+            className={cn(
+              "rounded-md p-1 text-[var(--color-muted)] hover:bg-red-500/10 hover:text-red-400",
+              busy && "opacity-50",
+            )}
+          >
+            <Trash2 className="h-4 w-4" />
+          </button>
+        )}
+      </td>
     </tr>
   );
 }
@@ -601,13 +787,15 @@ function StartingOrderInput({
   entry: AdminEntry;
   onSaved: () => void;
 }) {
-  const [value, setValue] = useState<string>(
-    entry.startingOrder === null ? "" : String(entry.startingOrder),
-  );
+  const initial = entry.startingOrder === null ? "" : String(entry.startingOrder);
+  const [value, setValue] = useState<string>(initial);
   const [busy, setBusy] = useState(false);
+  // Keep in sync when the server data changes underneath us (router.refresh
+  // after a bulk import) — otherwise the input would keep showing stale values.
+  useEffect(() => setValue(initial), [initial]);
 
   const save = async () => {
-    if (value === (entry.startingOrder === null ? "" : String(entry.startingOrder))) return;
+    if (value === initial) return;
     setBusy(true);
     try {
       await fetch(`/api/admin/entries/${entry.entryId}/start`, {
@@ -647,24 +835,31 @@ function RunInput({
   entryId,
   runType,
   run,
+  disabled,
   onSaved,
+  onError,
 }: {
   entryId: number;
   runType: "test" | "first" | "second";
   run: RunValue | null;
+  disabled: boolean;
   onSaved: () => void;
+  onError: (msg: string) => void;
 }) {
-  const [time, setTime] = useState<string>(
+  const initialTime =
     run?.timeSeconds === null || run?.timeSeconds === undefined
       ? ""
-      : String(run.timeSeconds),
-  );
-  const [penalty, setPenalty] = useState<string>(
-    run ? String(run.penaltySeconds) : "0",
-  );
+      : String(run.timeSeconds);
+  const initialPenalty = run ? String(run.penaltySeconds) : "0";
+  const [time, setTime] = useState<string>(initialTime);
+  const [penalty, setPenalty] = useState<string>(initialPenalty);
   const [busy, setBusy] = useState(false);
+  // Re-sync with server data after a refresh (e.g. bulk import from a photo).
+  useEffect(() => setTime(initialTime), [initialTime]);
+  useEffect(() => setPenalty(initialPenalty), [initialPenalty]);
 
   const save = async () => {
+    if (time === initialTime && penalty === initialPenalty) return;
     setBusy(true);
     try {
       const body = {
@@ -672,17 +867,24 @@ function RunInput({
         timeSeconds: time === "" ? null : Number(time.replace(",", ".")),
         penaltySeconds: penalty === "" ? 0 : Number(penalty),
       };
-      await fetch(`/api/admin/entries/${entryId}/runs`, {
+      const r = await apiCall(`/api/admin/entries/${entryId}/runs`, {
         method: "POST",
         headers: { "content-type": "application/json" },
         body: JSON.stringify(body),
       });
+      if (!r.ok) {
+        onError(r.error);
+        setTime(initialTime);
+        setPenalty(initialPenalty);
+        return;
+      }
       onSaved();
     } finally {
       setBusy(false);
     }
   };
 
+  const off = disabled || busy;
   return (
     <>
       <td className="px-2 py-1.5">
@@ -695,10 +897,11 @@ function RunInput({
           onKeyDown={(e) => {
             if (e.key === "Enter") (e.target as HTMLInputElement).blur();
           }}
-          disabled={busy}
+          disabled={off}
+          title={disabled ? "Klasse ist finalisiert — zum Korrigieren wieder öffnen" : undefined}
           className={cn(
             "w-20 rounded-md border border-[var(--color-border)] bg-[var(--color-background)] px-2 py-1 text-right text-sm tabular-nums",
-            busy && "opacity-50",
+            off && "opacity-50",
           )}
           placeholder="—"
         />
@@ -713,11 +916,12 @@ function RunInput({
           onKeyDown={(e) => {
             if (e.key === "Enter") (e.target as HTMLInputElement).blur();
           }}
-          disabled={busy}
+          disabled={off}
+          title={disabled ? "Klasse ist finalisiert — zum Korrigieren wieder öffnen" : undefined}
           min={0}
           className={cn(
             "w-14 rounded-md border border-[var(--color-border)] bg-[var(--color-background)] px-2 py-1 text-right text-sm tabular-nums",
-            busy && "opacity-50",
+            off && "opacity-50",
           )}
         />
       </td>

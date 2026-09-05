@@ -15,6 +15,13 @@
  *   - 3 Endläufe (Crumbach, Reinheim, Malsfeld ×1.1), no Streichergebnis
  *   - a driver who misses a (finalized) Endlauf is excluded from the ranking
  *   - same tie-break chain as hmj
+ *
+ *  Field changes (both championships):
+ *   - `withdrawn` drivers announced they will not compete. They keep their
+ *     row (season points are still shown) but are excluded from the ranking
+ *     in both championships — unranked, sorted to the bottom of the class.
+ *   - `nominated` drivers were not qualified via the list but fill a vacated
+ *     spot. They are scored exactly like qualified drivers.
  */
 
 export type Endlauf26Championship = "hmj" | "adac_hth";
@@ -221,6 +228,10 @@ export interface EndlaufDriverInput {
   seasonPosition: number | null;
   seasonPoints: number | null;
   seasonRaces: number;
+  /** Will not compete in any Endlauf (announced beforehand). */
+  withdrawn: boolean;
+  /** Replacement driver nominated by hand (not qualified via the list). */
+  nominated: boolean;
   seasonResults: SeasonResultInput[];
   endlaufResults: EndlaufResultInput[];
 }
@@ -265,11 +276,13 @@ export interface Endlauf26Row {
   verband: string | null;
   region: string | null;
   yearOfBirth: number | null;
+  withdrawn: boolean;
+  nominated: boolean;
   cells: ScoreCell[];
   totalPoints: number;
   rank: number | null;
   sharedRank: boolean;
-  /** adac_hth: missed a finalized Endlauf → not classified. */
+  /** Not classified: withdrawn (both) or missed a finalized Endlauf (adac_hth). */
   excluded: boolean;
   startedEndlaeufe: number;
   /** countback[i] = number of counted results with position i+1 */
@@ -449,9 +462,13 @@ function computeRowsForClass(
     const totalPoints = round2(
       cells.reduce((s, c) => s + (c.dropped ? 0 : c.points), 0),
     );
+    // Withdrawn drivers gave up their spot: unranked at the bottom in both
+    // championships. ADAC additionally excludes anyone who misses a
+    // finalized Endlauf (all Endläufe are mandatory).
     const excluded =
-      championship === "adac_hth" &&
-      cells.some((c) => c.kind === "endlauf" && c.available && !c.started);
+      d.withdrawn ||
+      (championship === "adac_hth" &&
+        cells.some((c) => c.kind === "endlauf" && c.available && !c.started));
     return {
       driverId: d.driverId,
       firstName: d.firstName,
@@ -462,6 +479,8 @@ function computeRowsForClass(
       verband: d.verband,
       region: d.region,
       yearOfBirth: d.yearOfBirth,
+      withdrawn: d.withdrawn,
+      nominated: d.nominated,
       cells,
       totalPoints,
       rank: null,

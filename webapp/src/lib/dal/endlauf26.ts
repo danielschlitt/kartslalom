@@ -1,5 +1,5 @@
 import "server-only";
-import { and, asc, eq, inArray } from "drizzle-orm";
+import { and, asc, eq, inArray, isNotNull, or, sql } from "drizzle-orm";
 import { db } from "@/db/drizzle";
 import {
   endlauf26Drivers,
@@ -118,6 +118,18 @@ export function toEventInfo(e: EndlaufEvent): EndlaufEventInfo {
   };
 }
 
+/* ───────────────────────────── field ───────────────────────────── */
+
+/**
+ * The Endlauf field: drivers qualified via the standings list plus
+ * Nachnominierungen. Everything else in `endlauf26_drivers` is a
+ * replacement candidate and must not show up anywhere public.
+ */
+const inFieldCondition = or(
+  eq(endlauf26Drivers.qualified, true),
+  eq(endlauf26Drivers.nominated, true),
+);
+
 /* ───────────────────────────── entries ───────────────────────────── */
 
 export interface EndlaufEntry extends EndlaufRankable {
@@ -127,6 +139,8 @@ export interface EndlaufEntry extends EndlaufRankable {
   verband: string | null;
   region: string | null;
   seasonPosition: number | null;
+  withdrawn: boolean;
+  nominated: boolean;
   startingOrder: number | null;
   positionRun1: number | null;
   positionRun2: number | null;
@@ -149,9 +163,17 @@ function entryRuns(e: typeof endlauf26Entries.$inferSelect): EndlaufEntryRuns {
   };
 }
 
+/**
+ * Entries of an event (optionally one age class), start-list order.
+ *
+ * Withdrawn drivers are hidden by default — they must not appear in start
+ * lists or live boards. Ranking/finalization pass `includeWithdrawn` so a
+ * driver who set a time before withdrawing keeps a consistent position.
+ */
 export async function getEndlaufEntriesForEvent(
   eventId: number,
   ageClass?: number,
+  opts: { includeWithdrawn?: boolean } = {},
 ): Promise<EndlaufEntry[]> {
   const rows = await db
     .select({
@@ -161,18 +183,20 @@ export async function getEndlaufEntriesForEvent(
       verband: endlauf26Drivers.verband,
       region: endlauf26Drivers.region,
       seasonPosition: endlauf26Drivers.seasonPosition,
+      withdrawn: endlauf26Drivers.withdrawn,
+      nominated: endlauf26Drivers.nominated,
       teamName: endlauf26Teams.name,
     })
     .from(endlauf26Entries)
     .innerJoin(endlauf26Drivers, eq(endlauf26Drivers.id, endlauf26Entries.driverId))
     .innerJoin(endlauf26Teams, eq(endlauf26Teams.id, endlauf26Drivers.teamId))
     .where(
-      ageClass === undefined
-        ? eq(endlauf26Entries.eventId, eventId)
-        : and(
-            eq(endlauf26Entries.eventId, eventId),
-            eq(endlauf26Entries.ageClass, ageClass),
-          ),
+      and(
+        eq(endlauf26Entries.eventId, eventId),
+        ageClass === undefined ? undefined : eq(endlauf26Entries.ageClass, ageClass),
+        inFieldCondition,
+        opts.includeWithdrawn ? undefined : eq(endlauf26Drivers.withdrawn, false),
+      ),
     )
     .orderBy(
       asc(endlauf26Entries.ageClass),
@@ -191,6 +215,8 @@ export async function getEndlaufEntriesForEvent(
     verband: r.verband,
     region: r.region,
     seasonPosition: r.seasonPosition,
+    withdrawn: r.withdrawn,
+    nominated: r.nominated,
     startingOrder: r.entry.startingOrder,
     positionRun1: r.entry.positionRun1,
     positionRun2: r.entry.positionRun2,
@@ -213,7 +239,9 @@ export async function getFinalizedClasses(eventId: number): Promise<Set<number>>
  * event. Called after every time/penalty save.
  */
 export async function recomputeLivePositions(eventId: number, ageClass: number) {
-  const entries = await getEndlaufEntriesForEvent(eventId, ageClass);
+  const entries = await getEndlaufEntriesForEvent(eventId, ageClass, {
+    includeWithdrawn: true,
+  });
   const positions = rankEndlaufEntries(entries);
   await db.transaction(async (tx) => {
     for (const p of positions) {
@@ -235,7 +263,9 @@ export async function recomputeLivePositions(eventId: number, ageClass: number) 
  * store them. Returns number of entries written.
  */
 export async function writeFinalResults(eventId: number, ageClass: number) {
-  const entries = await getEndlaufEntriesForEvent(eventId, ageClass);
+  const entries = await getEndlaufEntriesForEvent(eventId, ageClass, {
+    includeWithdrawn: true,
+  });
   const results = finalizeEndlaufClass(entries);
   const live = rankEndlaufEntries(entries);
   await db.transaction(async (tx) => {
@@ -281,7 +311,7 @@ export async function getEndlaufChampionship(
     })
     .from(endlauf26Drivers)
     .innerJoin(endlauf26Teams, eq(endlauf26Teams.id, endlauf26Drivers.teamId))
-    .where(eq(endlauf26Drivers.championship, championship))
+    .where(and(eq(endlauf26Drivers.championship, championship), inFieldCondition))
     .orderBy(asc(endlauf26Drivers.ageClass), asc(endlauf26Drivers.lastName));
 
   const driverIds = driverRows.map((r) => r.d.id);
@@ -338,6 +368,8 @@ export async function getEndlaufChampionship(
     seasonPosition: d.seasonPosition,
     seasonPoints: num(d.seasonPoints),
     seasonRaces: d.seasonRaces,
+    withdrawn: d.withdrawn,
+    nominated: d.nominated,
     seasonResults: (seasonByDriver.get(d.id) ?? [])
       .sort((a, b) => a.raceNumber - b.raceNumber)
       .map((s) => ({
@@ -373,4 +405,246 @@ export async function getEndlaufDriver(driverId: number) {
     .where(eq(endlauf26Drivers.id, driverId))
     .limit(1);
   return row ?? null;
+}
+
+/* ─────────────────────────── field management ─────────────────────────── */
+
+export interface EndlaufFieldDriver {
+  driverId: number;
+  firstName: string;
+  lastName: string;
+  teamName: string;
+  ageClass: number;
+  verband: string | null;
+  region: string | null;
+  seasonPosition: number | null;
+  seasonPoints: number | null;
+  seasonRaces: number;
+  qualified: boolean;
+  withdrawn: boolean;
+  nominated: boolean;
+  /** Some Endlauf time (training or Wertungslauf) is stored for this driver. */
+  hasTimes: boolean;
+}
+
+const hasAnyTime = or(
+  isNotNull(endlauf26Entries.testTime),
+  isNotNull(endlauf26Entries.run1Time),
+  isNotNull(endlauf26Entries.run2Time),
+);
+
+/**
+ * Every imported driver of a championship — the field (qualified or
+ * nominated) as well as the replacement candidates — for the admin page.
+ */
+export async function getEndlaufFieldDrivers(
+  championship: Endlauf26Championship,
+): Promise<EndlaufFieldDriver[]> {
+  const [rows, timed] = await Promise.all([
+    db
+      .select({ d: endlauf26Drivers, teamName: endlauf26Teams.name })
+      .from(endlauf26Drivers)
+      .innerJoin(endlauf26Teams, eq(endlauf26Teams.id, endlauf26Drivers.teamId))
+      .where(eq(endlauf26Drivers.championship, championship))
+      .orderBy(
+        asc(endlauf26Drivers.ageClass),
+        asc(endlauf26Drivers.seasonPosition),
+        asc(endlauf26Drivers.lastName),
+      ),
+    db
+      .selectDistinct({ driverId: endlauf26Entries.driverId })
+      .from(endlauf26Entries)
+      .innerJoin(endlauf26Events, eq(endlauf26Events.id, endlauf26Entries.eventId))
+      .where(and(eq(endlauf26Events.championship, championship), hasAnyTime)),
+  ]);
+  const timedIds = new Set(timed.map((t) => t.driverId));
+  return rows.map(({ d, teamName }) => ({
+    driverId: d.id,
+    firstName: d.firstName,
+    lastName: d.lastName,
+    teamName,
+    ageClass: d.ageClass,
+    verband: d.verband,
+    region: d.region,
+    seasonPosition: d.seasonPosition,
+    seasonPoints: num(d.seasonPoints),
+    seasonRaces: d.seasonRaces,
+    qualified: d.qualified,
+    withdrawn: d.withdrawn,
+    nominated: d.nominated,
+    hasTimes: timedIds.has(d.id),
+  }));
+}
+
+/** Whether any entry of (event, class) already has a time or the class is finalized. */
+async function classIsUnderway(eventId: number, ageClass: number): Promise<boolean> {
+  const [fin] = await db
+    .select({ id: endlauf26Finalizations.id })
+    .from(endlauf26Finalizations)
+    .where(
+      and(
+        eq(endlauf26Finalizations.eventId, eventId),
+        eq(endlauf26Finalizations.ageClass, ageClass),
+      ),
+    )
+    .limit(1);
+  if (fin) return true;
+  const [timed] = await db
+    .select({ id: endlauf26Entries.id })
+    .from(endlauf26Entries)
+    .where(
+      and(
+        eq(endlauf26Entries.eventId, eventId),
+        eq(endlauf26Entries.ageClass, ageClass),
+        hasAnyTime,
+      ),
+    )
+    .limit(1);
+  return !!timed;
+}
+
+/**
+ * Renumber the starting order 1..n of one age class for every event of the
+ * championship whose class has not started yet (no times, not finalized).
+ * The relative order is preserved, so manual tweaks survive; withdrawn
+ * drivers are skipped and a fresh entry with order 0 ends up first (the
+ * replacement has the worst pre-Endlauf standing → starts first).
+ */
+async function compactStartingOrders(
+  championship: Endlauf26Championship,
+  ageClass: number,
+): Promise<void> {
+  const events = await db
+    .select({ id: endlauf26Events.id })
+    .from(endlauf26Events)
+    .where(eq(endlauf26Events.championship, championship));
+
+  for (const ev of events) {
+    if (await classIsUnderway(ev.id, ageClass)) continue;
+    const entries = await db
+      .select({
+        id: endlauf26Entries.id,
+        startingOrder: endlauf26Entries.startingOrder,
+        lastName: endlauf26Drivers.lastName,
+      })
+      .from(endlauf26Entries)
+      .innerJoin(endlauf26Drivers, eq(endlauf26Drivers.id, endlauf26Entries.driverId))
+      .where(
+        and(
+          eq(endlauf26Entries.eventId, ev.id),
+          eq(endlauf26Entries.ageClass, ageClass),
+          inFieldCondition,
+          eq(endlauf26Drivers.withdrawn, false),
+        ),
+      );
+    entries.sort((a, b) => {
+      const ao = a.startingOrder ?? Number.MAX_SAFE_INTEGER;
+      const bo = b.startingOrder ?? Number.MAX_SAFE_INTEGER;
+      if (ao !== bo) return ao - bo;
+      return a.lastName.localeCompare(b.lastName, "de");
+    });
+    await db.transaction(async (tx) => {
+      for (let i = 0; i < entries.length; i++) {
+        if (entries[i].startingOrder === i + 1) continue;
+        await tx
+          .update(endlauf26Entries)
+          .set({ startingOrder: i + 1 })
+          .where(eq(endlauf26Entries.id, entries[i].id));
+      }
+    });
+  }
+}
+
+export type FieldChangeResult =
+  | "ok"
+  | "not_found"
+  | "not_in_field"
+  | "already_qualified"
+  | "has_times";
+
+/**
+ * Flag a driver of the field as not competing (or take it back). The entries
+ * stay in place — they are hidden from start lists by `withdrawn`, and the
+ * remaining drivers are renumbered for classes that have not started yet.
+ */
+export async function setEndlaufDriverWithdrawn(
+  driverId: number,
+  withdrawn: boolean,
+): Promise<FieldChangeResult> {
+  const [d] = await db
+    .select()
+    .from(endlauf26Drivers)
+    .where(eq(endlauf26Drivers.id, driverId))
+    .limit(1);
+  if (!d) return "not_found";
+  if (!d.qualified && !d.nominated) return "not_in_field";
+  if (d.withdrawn !== withdrawn) {
+    await db
+      .update(endlauf26Drivers)
+      .set({ withdrawn })
+      .where(eq(endlauf26Drivers.id, driverId));
+  }
+  await compactStartingOrders(d.championship, d.ageClass);
+  return "ok";
+}
+
+/**
+ * Nominate a replacement candidate (creates its entries for every Endlauf,
+ * starting first in classes that have not started yet) — or revoke a
+ * nomination, which is only possible while no time has been recorded.
+ */
+export async function setEndlaufDriverNominated(
+  driverId: number,
+  nominated: boolean,
+): Promise<FieldChangeResult> {
+  const [d] = await db
+    .select()
+    .from(endlauf26Drivers)
+    .where(eq(endlauf26Drivers.id, driverId))
+    .limit(1);
+  if (!d) return "not_found";
+  if (d.qualified) return "already_qualified";
+
+  if (nominated) {
+    await db
+      .update(endlauf26Drivers)
+      .set({ nominated: true, withdrawn: false })
+      .where(eq(endlauf26Drivers.id, driverId));
+    const events = await getEndlaufEvents(d.championship);
+    for (const ev of events) {
+      // Classes already underway keep their order — the newcomer is appended.
+      let startingOrder = 0;
+      if (await classIsUnderway(ev.id, d.ageClass)) {
+        const [m] = await db
+          .select({ max: sql<number | null>`max(${endlauf26Entries.startingOrder})` })
+          .from(endlauf26Entries)
+          .where(
+            and(
+              eq(endlauf26Entries.eventId, ev.id),
+              eq(endlauf26Entries.ageClass, d.ageClass),
+            ),
+          );
+        startingOrder = (m?.max ?? 0) + 1;
+      }
+      await db
+        .insert(endlauf26Entries)
+        .values({ eventId: ev.id, driverId, ageClass: d.ageClass, startingOrder })
+        .onConflictDoNothing();
+    }
+  } else {
+    const [timed] = await db
+      .select({ id: endlauf26Entries.id })
+      .from(endlauf26Entries)
+      .where(and(eq(endlauf26Entries.driverId, driverId), hasAnyTime))
+      .limit(1);
+    if (timed) return "has_times";
+    await db.delete(endlauf26Entries).where(eq(endlauf26Entries.driverId, driverId));
+    await db
+      .update(endlauf26Drivers)
+      .set({ nominated: false, withdrawn: false })
+      .where(eq(endlauf26Drivers.id, driverId));
+  }
+
+  await compactStartingOrders(d.championship, d.ageClass);
+  return "ok";
 }

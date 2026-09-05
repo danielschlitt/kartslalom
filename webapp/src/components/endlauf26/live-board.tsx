@@ -91,13 +91,16 @@ export function LiveBoard({
                   >
                     <span
                       className={cn(
-                        "inline-flex h-7 w-7 items-center justify-center rounded-md text-xs font-semibold tabular-nums",
+                        "inline-flex h-7 min-w-7 items-center justify-center rounded-md px-1 text-xs font-semibold tabular-nums",
                         isHome && "bg-[var(--color-rank-blue)] text-white",
                         e.positionLive === 1 && "bg-[var(--color-rank-green)] text-white",
                         e.positionLive === null && "text-[var(--color-muted)]",
                       )}
+                      title={finalized && best === null ? "nicht gestartet" : undefined}
                     >
-                      {finalized ? (e.finishPosition ?? "—") : (e.positionLive ?? "—")}
+                      {finalized
+                        ? (e.finishPosition ?? (best === null ? "n. g." : "—"))
+                        : (e.positionLive ?? "—")}
                     </span>
                   </td>
                   <td
