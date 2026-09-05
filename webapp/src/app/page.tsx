@@ -4,15 +4,17 @@ import { getActiveAgeClasses, getAllRaceEvents } from "@/lib/dal/races";
 import { getEndlaufEvents } from "@/lib/dal/endlauf26";
 import { ENDLAUF26_LABELS, ENDLAUF26_SLUGS } from "@/lib/endlauf26/ranking";
 import { formatFactor } from "@/lib/endlauf26/format";
+import { isAdminSession } from "@/lib/admin-auth";
 import { cn, formatDateDe } from "@/lib/utils";
 
 export const dynamic = "force-dynamic";
 
 export default async function HomePage() {
-  const [events, ageClasses, endlaufEvents] = await Promise.all([
+  const [events, ageClasses, endlaufEvents, isAdmin] = await Promise.all([
     getAllRaceEvents(),
     getActiveAgeClasses(),
     getEndlaufEvents(),
+    isAdminSession(),
   ]);
   const hmjEvents = endlaufEvents.filter((e) => e.championship === "hmj");
   const adacEvents = endlaufEvents.filter((e) => e.championship === "adac_hth");
@@ -84,18 +86,22 @@ export default async function HomePage() {
           hint="aktuelle Altersklasse"
           accent
         />
-        <QuickLink
-          href="/admin"
-          icon={<Calendar className="h-4 w-4" />}
-          label="Admin"
-          hint="Zeiten erfassen"
-        />
-        <QuickLink
-          href="/admin/import"
-          icon={<Flag className="h-4 w-4" />}
-          label="Import"
-          hint="CSV-Backfill"
-        />
+        {isAdmin && (
+          <>
+            <QuickLink
+              href="/admin"
+              icon={<Calendar className="h-4 w-4" />}
+              label="Admin"
+              hint="Zeiten erfassen"
+            />
+            <QuickLink
+              href="/admin/import"
+              icon={<Flag className="h-4 w-4" />}
+              label="Import"
+              hint="CSV-Backfill"
+            />
+          </>
+        )}
       </div>
 
       {ageClasses.length > 0 && (

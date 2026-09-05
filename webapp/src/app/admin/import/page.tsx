@@ -1,4 +1,8 @@
+import { AdminLogin } from "@/components/admin-login.client";
+import { isAdminSession } from "@/lib/admin-auth";
 import { ImportClient } from "./import.client";
+
+export const dynamic = "force-dynamic";
 
 const TEMPLATE = [
   "race_event",
@@ -17,7 +21,9 @@ const TEMPLATE = [
 const EXAMPLE =
   "1,26.04.2026,Altersklasse I,Glatter Jonas,OAMC Reinheim,42.51,0,41.83,0,40.97,5";
 
-export default function ImportPage() {
+export default async function ImportPage() {
+  if (!(await isAdminSession())) return <AdminLogin title="Admin · CSV-Import" />;
+
   return (
     <div className="space-y-6">
       <header>

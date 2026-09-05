@@ -1,4 +1,6 @@
 import { notFound } from "next/navigation";
+import { AdminLogin } from "@/components/admin-login.client";
+import { isAdminSession } from "@/lib/admin-auth";
 import {
   getEndlaufEntriesForEvent,
   getEndlaufEventBySlug,
@@ -22,6 +24,9 @@ export default async function EndlaufAdminEventPage({
   const { champ, slug } = await params;
   const championship = championshipFromSlug(champ);
   if (!championship) notFound();
+
+  if (!(await isAdminSession())) return <AdminLogin title="Admin · Endlauf" />;
+
   const event = await getEndlaufEventBySlug(championship, slug);
   if (!event) notFound();
 

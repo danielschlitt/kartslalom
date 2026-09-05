@@ -5,11 +5,13 @@ import {
   ENDLAUF26_SLUGS,
   type Endlauf26Championship,
 } from "@/lib/endlauf26/ranking";
+import { isAdminSession } from "@/lib/admin-auth";
 import { cn } from "@/lib/utils";
 
 export type ChampTab = "standings" | "events" | "teams" | "live" | "admin";
 
-export function ChampHeader({
+/** Server component: Endlauf page header with tab bar. The Admin tab is only shown to unlocked admins. */
+export async function ChampHeader({
   championship,
   active,
   title,
@@ -25,12 +27,16 @@ export function ChampHeader({
   const slug = ENDLAUF26_SLUGS[championship];
   const base = `/endlauf26/${slug}`;
   const labels = ENDLAUF26_LABELS[championship];
+  // Keep the Admin tab visible on the admin route itself so the login form has a header.
+  const showAdmin = active === "admin" || (await isAdminSession());
   const tabs: { id: ChampTab; href: string; label: string; icon: React.ReactNode }[] = [
     { id: "standings", href: base, label: "Wertung", icon: <Trophy className="h-4 w-4" /> },
     { id: "events", href: `${base}/events`, label: "Endläufe", icon: <Flag className="h-4 w-4" /> },
     { id: "teams", href: `${base}/teams`, label: "Vereine", icon: <Users className="h-4 w-4" /> },
     { id: "live", href: `${base}/live`, label: "Live", icon: <Zap className="h-4 w-4" /> },
-    { id: "admin", href: `${base}/admin`, label: "Admin", icon: <Settings className="h-4 w-4" /> },
+    ...(showAdmin
+      ? [{ id: "admin" as const, href: `${base}/admin`, label: "Admin", icon: <Settings className="h-4 w-4" /> }]
+      : []),
   ];
 
   return (

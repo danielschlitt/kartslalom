@@ -1,5 +1,6 @@
 import Link from "next/link";
 import { notFound } from "next/navigation";
+import { AutoRefresh } from "@/components/auto-refresh";
 import { ChampHeader } from "@/components/endlauf26/champ-header";
 import { LiveView } from "@/components/endlauf26/live-view";
 import { getLiveEndlaufEvent } from "@/lib/dal/endlauf26";
@@ -32,9 +33,7 @@ export default async function EndlaufLivePage({
             ← Zur Wertung
           </Link>
         </p>
-        <script
-          dangerouslySetInnerHTML={{ __html: `setTimeout(() => location.reload(), 15000);` }}
-        />
+        <AutoRefresh intervalMs={15000} />
       </div>
     );
   }

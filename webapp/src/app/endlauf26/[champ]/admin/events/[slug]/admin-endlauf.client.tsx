@@ -64,6 +64,7 @@ const RUN_LABEL: Record<RunType, string> = {
 };
 
 const ERROR_TEXT: Record<string, string> = {
+  unauthorized: "Nicht als Admin freigeschaltet — Seite neu laden und Admin-Token eingeben.",
   age_class_finalized: "Klasse ist bereits abgeschlossen.",
   event_not_live: "Der Endlauf ist nicht live.",
   age_class_not_active: "Diese Klasse ist nicht aktiv.",

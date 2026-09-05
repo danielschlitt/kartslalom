@@ -14,6 +14,7 @@ import {
   type RankedEntry,
 } from "@/lib/ranking";
 import { StandingsTable } from "@/components/standings-table";
+import { isAdminSession } from "@/lib/admin-auth";
 import { cn, formatDateDe } from "@/lib/utils";
 import type { EnrichedEntry } from "@/lib/dal/races";
 
@@ -31,10 +32,11 @@ export default async function RaceEventPage({
   const event = await getRaceEvent(eventId);
   if (!event) notFound();
 
-  const [entries, pointsScale, finalizedAgeClassIds] = await Promise.all([
+  const [entries, pointsScale, finalizedAgeClassIds, isAdmin] = await Promise.all([
     getEnrichedEntriesForEvent(eventId),
     getPointsScale(),
     getFinalizedAgeClassIds(eventId),
+    isAdminSession(),
   ]);
 
   // Group entries by age class
@@ -101,13 +103,15 @@ export default async function RaceEventPage({
               Live-Zeiten
             </Link>
           )}
-          <Link
-            href={`/admin/events/${event.id}`}
-            className="inline-flex items-center gap-1.5 rounded-md border border-[var(--color-border)] bg-[var(--color-surface)] px-3 py-1.5 text-sm text-[var(--color-muted)] hover:bg-[var(--color-surface-2)] hover:text-[var(--color-foreground)]"
-          >
-            <Settings className="h-4 w-4" />
-            Zeiten erfassen
-          </Link>
+          {isAdmin && (
+            <Link
+              href={`/admin/events/${event.id}`}
+              className="inline-flex items-center gap-1.5 rounded-md border border-[var(--color-border)] bg-[var(--color-surface)] px-3 py-1.5 text-sm text-[var(--color-muted)] hover:bg-[var(--color-surface-2)] hover:text-[var(--color-foreground)]"
+            >
+              <Settings className="h-4 w-4" />
+              Zeiten erfassen
+            </Link>
+          )}
         </div>
       </header>
 

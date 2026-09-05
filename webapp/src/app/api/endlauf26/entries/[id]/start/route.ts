@@ -1,4 +1,5 @@
 import { NextRequest, NextResponse } from "next/server";
+import { isAdminSession, unauthorizedResponse } from "@/lib/admin-auth";
 import { eq } from "drizzle-orm";
 import { db } from "@/db/drizzle";
 import { endlauf26Entries } from "@/db/schema";
@@ -7,6 +8,7 @@ export async function PATCH(
   req: NextRequest,
   { params }: { params: Promise<{ id: string }> },
 ) {
+  if (!(await isAdminSession())) return unauthorizedResponse();
   const { id } = await params;
   const entryId = Number(id);
   if (!Number.isFinite(entryId)) {

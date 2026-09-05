@@ -1,4 +1,5 @@
 import Link from "next/link";
+import { AutoRefresh } from "@/components/auto-refresh";
 import { LiveView } from "@/components/endlauf26/live-view";
 import { getLiveEndlaufEvent } from "@/lib/dal/endlauf26";
 import { ENDLAUF26_LABELS, ENDLAUF26_SLUGS } from "@/lib/endlauf26/ranking";
@@ -24,9 +25,7 @@ export default async function EndlaufLiveAnyPage() {
           {ENDLAUF26_LABELS.adac_hth.short} →
         </Link>
       </p>
-      <script
-        dangerouslySetInnerHTML={{ __html: `setTimeout(() => location.reload(), 15000);` }}
-      />
+      <AutoRefresh intervalMs={15000} />
     </div>
   );
 }

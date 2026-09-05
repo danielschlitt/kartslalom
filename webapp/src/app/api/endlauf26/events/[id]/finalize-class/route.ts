@@ -1,4 +1,5 @@
 import { NextRequest, NextResponse } from "next/server";
+import { isAdminSession, unauthorizedResponse } from "@/lib/admin-auth";
 import { and, eq } from "drizzle-orm";
 import { db } from "@/db/drizzle";
 import { endlauf26Events, endlauf26Finalizations } from "@/db/schema";
@@ -30,6 +31,7 @@ export async function POST(
   req: NextRequest,
   { params }: { params: Promise<{ id: string }> },
 ) {
+  if (!(await isAdminSession())) return unauthorizedResponse();
   const { id } = await params;
   const { eventId, event } = await loadEvent(id);
   if (!event) return NextResponse.json({ error: "not_found" }, { status: 404 });
@@ -77,6 +79,7 @@ export async function DELETE(
   req: NextRequest,
   { params }: { params: Promise<{ id: string }> },
 ) {
+  if (!(await isAdminSession())) return unauthorizedResponse();
   const { id } = await params;
   const { eventId, event } = await loadEvent(id);
   if (!event) return NextResponse.json({ error: "not_found" }, { status: 404 });

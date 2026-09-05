@@ -1,4 +1,5 @@
 import { NextRequest, NextResponse } from "next/server";
+import { isAdminSession, unauthorizedResponse } from "@/lib/admin-auth";
 import { eq } from "drizzle-orm";
 import { db } from "@/db/drizzle";
 import { endlauf26Entries, endlauf26Finalizations } from "@/db/schema";
@@ -19,6 +20,7 @@ import { championshipFromSlug, ENDLAUF26_AGE_CLASSES } from "@/lib/endlauf26/ran
  * automatically.
  */
 export async function POST(req: NextRequest) {
+  if (!(await isAdminSession())) return unauthorizedResponse();
   const body = await req.json().catch(() => ({}));
   const slug = body?.championship as string | undefined;
   const championship = slug ? championshipFromSlug(slug) : undefined;

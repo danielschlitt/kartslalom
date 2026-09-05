@@ -1,4 +1,5 @@
 import { NextRequest, NextResponse } from "next/server";
+import { isAdminSession, unauthorizedResponse } from "@/lib/admin-auth";
 import { and, eq } from "drizzle-orm";
 import { db } from "@/db/drizzle";
 import {
@@ -32,6 +33,7 @@ interface ImportError {
 }
 
 export async function POST(req: NextRequest) {
+  if (!(await isAdminSession())) return unauthorizedResponse();
   const csvText = await req.text();
   if (!csvText.trim()) {
     return NextResponse.json({ error: "empty_body" }, { status: 400 });

@@ -1,4 +1,5 @@
 import { NextRequest, NextResponse } from "next/server";
+import { isAdminSession, unauthorizedResponse } from "@/lib/admin-auth";
 import { and, eq } from "drizzle-orm";
 import { db } from "@/db/drizzle";
 import {
@@ -49,6 +50,7 @@ export async function POST(
   req: NextRequest,
   { params }: { params: Promise<{ id: string }> },
 ) {
+  if (!(await isAdminSession())) return unauthorizedResponse();
   const { id } = await params;
   const eventId = Number(id);
   if (!Number.isFinite(eventId)) {

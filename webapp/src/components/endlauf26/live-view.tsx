@@ -1,5 +1,6 @@
 import Link from "next/link";
 import { Zap } from "lucide-react";
+import { AutoRefresh } from "@/components/auto-refresh";
 import { LiveBoard } from "@/components/endlauf26/live-board";
 import {
   getEndlaufEntriesForEvent,
@@ -11,6 +12,7 @@ import {
   ENDLAUF26_LABELS,
   ENDLAUF26_SLUGS,
 } from "@/lib/endlauf26/ranking";
+import { isAdminSession } from "@/lib/admin-auth";
 import { formatDateDe } from "@/lib/utils";
 
 /** Server component: the live timing view for a live Endlauf event (auto-reloads). */
@@ -18,20 +20,27 @@ export async function LiveView({ event }: { event: EndlaufEvent }) {
   const base = `/endlauf26/${ENDLAUF26_SLUGS[event.championship]}`;
 
   if (event.liveAgeClass === null) {
+    const isAdmin = await isAdminSession();
     return (
       <div className="space-y-4">
         <LiveHeader event={event} />
         <p className="rounded-lg border border-[var(--color-live)]/40 bg-[var(--color-live)]/10 p-6 text-center text-sm text-[var(--color-muted)]">
-          Der Endlauf ist live, aber es ist noch keine Klasse aktiviert. Bitte im{" "}
-          <Link
-            href={`${base}/admin/events/${event.slug}`}
-            className="text-[var(--color-accent)] hover:underline"
-          >
-            Admin
-          </Link>{" "}
-          eine Klasse aktivieren.
+          Der Endlauf ist live, aber es ist noch keine Klasse aktiviert.
+          {isAdmin && (
+            <>
+              {" "}
+              Bitte im{" "}
+              <Link
+                href={`${base}/admin/events/${event.slug}`}
+                className="text-[var(--color-accent)] hover:underline"
+              >
+                Admin
+              </Link>{" "}
+              eine Klasse aktivieren.
+            </>
+          )}
         </p>
-        <AutoReload />
+        <AutoRefresh intervalMs={5000} />
       </div>
     );
   }
@@ -55,18 +64,8 @@ export async function LiveView({ event }: { event: EndlaufEvent }) {
         liveEntryId={event.liveEntryId}
         finalized={finalized.has(event.liveAgeClass)}
       />
-      <AutoReload />
+      <AutoRefresh intervalMs={5000} />
     </div>
-  );
-}
-
-function AutoReload() {
-  return (
-    <script
-      dangerouslySetInnerHTML={{
-        __html: `setTimeout(() => location.reload(), 5000);`,
-      }}
-    />
   );
 }
 

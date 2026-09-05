@@ -1,4 +1,5 @@
 import { NextResponse } from "next/server";
+import { isAdminSession, unauthorizedResponse } from "@/lib/admin-auth";
 import { eq } from "drizzle-orm";
 import { db } from "@/db/drizzle";
 import { raceEntries } from "@/db/schema";
@@ -28,6 +29,7 @@ import { DEFAULT_VIEW, rankRaceEntries } from "@/lib/ranking";
  *     as-is to avoid wiping legacy backfilled points)
  */
 export async function POST() {
+  if (!(await isAdminSession())) return unauthorizedResponse();
   const [allEvents, pointsScale] = await Promise.all([
     getAllRaceEvents(),
     getPointsScale(),

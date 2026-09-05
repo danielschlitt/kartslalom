@@ -1,4 +1,6 @@
 import { notFound } from "next/navigation";
+import { AdminLogin } from "@/components/admin-login.client";
+import { isAdminSession } from "@/lib/admin-auth";
 import {
   getEnrichedEntriesForEvent,
   getFinalizedAgeClassIds,
@@ -13,6 +15,8 @@ export default async function AdminEventPage({
 }: {
   params: Promise<{ id: string }>;
 }) {
+  if (!(await isAdminSession())) return <AdminLogin title="Admin · Zeiten erfassen" />;
+
   const { id } = await params;
   const eventId = Number(id);
   if (!Number.isFinite(eventId)) notFound();

@@ -1,11 +1,13 @@
 import Link from "next/link";
 import { Zap } from "lucide-react";
+import { AutoRefresh } from "@/components/auto-refresh";
 import { StandingsTable } from "@/components/standings-table";
 import {
   getEnrichedEntriesForEvent,
   getLiveEvent,
 } from "@/lib/dal/races";
 import { computeHighlights, rankLiveStandings } from "@/lib/ranking";
+import { isAdminSession } from "@/lib/admin-auth";
 import { formatDateDe } from "@/lib/utils";
 import { db } from "@/db/drizzle";
 import { ageClasses } from "@/db/schema";
@@ -33,19 +35,26 @@ export default async function LivePage() {
   }
 
   if (!liveEvent.liveAgeClassId) {
+    const isAdmin = await isAdminSession();
     return (
       <div className="space-y-4">
         <LiveHeader event={liveEvent} />
         <p className="rounded-lg border border-[var(--color-live)]/40 bg-[var(--color-live)]/10 p-6 text-center text-sm text-[var(--color-muted)]">
           Das Rennen ist live, aber es ist noch keine Altersklasse als aktiv
-          ausgewählt. Bitte im{" "}
-          <Link
-            href={`/admin/events/${liveEvent.id}`}
-            className="text-[var(--color-accent)] hover:underline"
-          >
-            Admin
-          </Link>{" "}
-          eine Altersklasse festlegen.
+          ausgewählt.
+          {isAdmin && (
+            <>
+              {" "}
+              Bitte im{" "}
+              <Link
+                href={`/admin/events/${liveEvent.id}`}
+                className="text-[var(--color-accent)] hover:underline"
+              >
+                Admin
+              </Link>{" "}
+              eine Altersklasse festlegen.
+            </>
+          )}
         </p>
       </div>
     );
@@ -85,11 +94,7 @@ export default async function LivePage() {
         showPoints={false}
       />
 
-      <script
-        dangerouslySetInnerHTML={{
-          __html: `setTimeout(() => location.reload(), 5000);`,
-        }}
-      />
+      <AutoRefresh intervalMs={5000} />
     </div>
   );
 }

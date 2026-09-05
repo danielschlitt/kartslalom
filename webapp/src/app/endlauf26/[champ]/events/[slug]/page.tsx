@@ -4,6 +4,7 @@ import { Settings } from "lucide-react";
 import { ChampHeader } from "@/components/endlauf26/champ-header";
 import { EventStatusBadge } from "@/components/endlauf26/event-status-badge";
 import { LiveBoard } from "@/components/endlauf26/live-board";
+import { isAdminSession } from "@/lib/admin-auth";
 import {
   getEndlaufEntriesForEvent,
   getEndlaufEventBySlug,
@@ -30,9 +31,10 @@ export default async function EndlaufEventPage({
   const event = await getEndlaufEventBySlug(championship, slug);
   if (!event) notFound();
 
-  const [entries, finalized] = await Promise.all([
+  const [entries, finalized, isAdmin] = await Promise.all([
     getEndlaufEntriesForEvent(event.id),
     getFinalizedClasses(event.id),
+    isAdminSession(),
   ]);
   const classes = [...new Set(entries.map((e) => e.ageClass))].sort((a, b) => a - b);
   const base = `/endlauf26/${ENDLAUF26_SLUGS[championship]}`;
@@ -60,12 +62,14 @@ export default async function EndlaufEventPage({
             Live-Ansicht →
           </Link>
         )}
-        <Link
-          href={`${base}/admin/events/${event.slug}`}
-          className="inline-flex items-center gap-1 text-[var(--color-muted)] hover:text-[var(--color-foreground)]"
-        >
-          <Settings className="h-3.5 w-3.5" /> Zeiten erfassen
-        </Link>
+        {isAdmin && (
+          <Link
+            href={`${base}/admin/events/${event.slug}`}
+            className="inline-flex items-center gap-1 text-[var(--color-muted)] hover:text-[var(--color-foreground)]"
+          >
+            <Settings className="h-3.5 w-3.5" /> Zeiten erfassen
+          </Link>
+        )}
       </div>
 
       {classes.map((c) => (

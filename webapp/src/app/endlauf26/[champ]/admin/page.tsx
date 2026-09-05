@@ -1,8 +1,10 @@
 import Link from "next/link";
 import { notFound } from "next/navigation";
 import { ArrowRight } from "lucide-react";
+import { AdminLogin } from "@/components/admin-login.client";
 import { ChampHeader } from "@/components/endlauf26/champ-header";
 import { EventStatusBadge } from "@/components/endlauf26/event-status-badge";
+import { isAdminSession } from "@/lib/admin-auth";
 import { getEndlaufEvents, getFinalizedClasses } from "@/lib/dal/endlauf26";
 import { formatFactor } from "@/lib/endlauf26/format";
 import {
@@ -23,6 +25,16 @@ export default async function EndlaufAdminIndexPage({
   const { champ } = await params;
   const championship = championshipFromSlug(champ);
   if (!championship) notFound();
+
+  if (!(await isAdminSession())) {
+    return (
+      <div className="space-y-6">
+        <ChampHeader championship={championship} active="admin" title="Admin · Endläufe" />
+        <AdminLogin title="Admin · Endläufe" />
+      </div>
+    );
+  }
+
   const events = await getEndlaufEvents(championship);
   const finalized = await Promise.all(events.map((e) => getFinalizedClasses(e.id)));
   const slug = ENDLAUF26_SLUGS[championship];

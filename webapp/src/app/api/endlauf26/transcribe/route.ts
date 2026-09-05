@@ -1,16 +1,34 @@
 import { NextRequest, NextResponse } from "next/server";
+import { isAdminSession, unauthorizedResponse } from "@/lib/admin-auth";
 import { parseDictation } from "@/lib/endlauf26/dictation";
+import { extractLapTime } from "@/lib/endlauf26/extract-lap-time";
 
 export const runtime = "nodejs";
 
 /**
+ * Whisper's `prompt` is NOT an instruction — it is treated as preceding
+ * transcript text and only steers spelling/style. Instruction-like prompts
+ * ("Beispiele: …") get echoed back verbatim whenever Whisper hears silence or
+ * noise, which is exactly the "Beispiele 2,5. Beispiele 2,5." loop we saw.
+ * So: a short, realistic sample of what a dictation sounds like, nothing else.
+ */
+const WHISPER_STYLE_PROMPT =
+  "Zweiundvierzig Komma drei fünf, zwei Strafsekunden. Einundvierzig Komma acht, keine Fehler. Korrektur, die Zeit ist vierzig Komma neun sieben.";
+
+/** Uploads smaller than this cannot contain a spoken lap time. */
+const MIN_AUDIO_BYTES = 1500;
+
+/**
  * Dictate a lap time: accepts `multipart/form-data` with an `audio` file,
- * transcribes it with OpenAI Whisper and extracts time + penalty seconds.
+ * transcribes it with OpenAI Whisper, then asks a chat model to extract the
+ * final time + penalty seconds as JSON (handles corrections like "Korrektur,
+ * die Zeit ist …"). Falls back to the regex parser if the extraction call fails.
  *
  * Requires `OPENAI_API_KEY` (optionally `OPENAI_TRANSCRIBE_MODEL`, default
- * `whisper-1`).
+ * `whisper-1`, and `OPENAI_EXTRACT_MODEL`, default `gpt-4o-mini`).
  */
 export async function POST(req: NextRequest) {
+  if (!(await isAdminSession())) return unauthorizedResponse();
   const apiKey = process.env.OPENAI_API_KEY;
   if (!apiKey) {
     return NextResponse.json(
@@ -24,8 +42,12 @@ export async function POST(req: NextRequest) {
   if (!(audio instanceof Blob) || audio.size === 0) {
     return NextResponse.json({ error: "missing_audio" }, { status: 400 });
   }
+  if (audio.size < MIN_AUDIO_BYTES) {
+    return NextResponse.json({ error: "no_speech", reason: "audio_too_short" }, { status: 422 });
+  }
 
   const model = process.env.OPENAI_TRANSCRIBE_MODEL || "whisper-1";
+  const isWhisper1 = model === "whisper-1";
   const upstream = new FormData();
   const fileName =
     (audio as File).name && (audio as File).name !== "blob"
@@ -35,11 +57,9 @@ export async function POST(req: NextRequest) {
   upstream.append("model", model);
   upstream.append("language", "de");
   upstream.append("temperature", "0");
-  upstream.append(
-    "prompt",
-    "Kartslalom Zeitansage. Zeit in Sekunden mit Komma, danach Strafsekunden. Beispiele: 42,35. 41,80 zwei Strafsekunden. 55,2 keine Fehler.",
-  );
-  if (model === "whisper-1") upstream.append("response_format", "json");
+  upstream.append("prompt", WHISPER_STYLE_PROMPT);
+  // verbose_json gives per-segment no_speech_prob so we can reject silence.
+  if (isWhisper1) upstream.append("response_format", "verbose_json");
 
   let res: Response;
   try {
@@ -63,17 +83,79 @@ export async function POST(req: NextRequest) {
     );
   }
 
-  const data = (await res.json().catch(() => ({}))) as { text?: string };
+  const data = (await res.json().catch(() => ({}))) as {
+    text?: string;
+    segments?: { no_speech_prob?: number; text?: string }[];
+  };
   const text = (data.text ?? "").trim();
-  const parsed = parseDictation(text);
 
-  return NextResponse.json({
-    ok: true,
-    text,
-    normalized: parsed.normalized,
-    timeSeconds: parsed.timeSeconds,
-    penaltySeconds: parsed.penaltySeconds,
-  });
+  const silence = detectSilence(text, data.segments);
+  if (silence) {
+    return NextResponse.json({ error: "no_speech", reason: silence, text }, { status: 422 });
+  }
+
+  // Stage 2: structured extraction (handles corrections, free-form phrasing).
+  try {
+    const extracted = await extractLapTime(text, apiKey);
+    return NextResponse.json({
+      ok: true,
+      text,
+      timeSeconds: extracted.timeSeconds,
+      penaltySeconds: extracted.penaltySeconds,
+      note: extracted.note,
+      source: "llm",
+    });
+  } catch (err) {
+    console.warn("[transcribe] extraction failed, falling back to regex parser:", err);
+    const parsed = parseDictation(text);
+    return NextResponse.json({
+      ok: true,
+      text,
+      normalized: parsed.normalized,
+      timeSeconds: parsed.timeSeconds,
+      penaltySeconds: parsed.penaltySeconds,
+      note: "",
+      source: "regex",
+    });
+  }
+}
+
+/**
+ * Returns a reason string when the transcript is most likely a Whisper
+ * hallucination on silence/noise, else null.
+ */
+function detectSilence(
+  text: string,
+  segments: { no_speech_prob?: number; text?: string }[] | undefined,
+): string | null {
+  if (!text) return "empty_transcript";
+
+  // 1. Whisper's own confidence that a segment contains no speech.
+  if (segments && segments.length > 0) {
+    const probs = segments
+      .map((s) => s.no_speech_prob)
+      .filter((p): p is number => typeof p === "number");
+    if (probs.length > 0) {
+      const avg = probs.reduce((a, b) => a + b, 0) / probs.length;
+      if (avg > 0.6) return "no_speech_prob";
+    }
+  }
+
+  // 2. Echo of our style prompt (Whisper repeats prompt text on silence).
+  const norm = (s: string) => s.toLowerCase().replace(/[^\p{L}\p{N}]+/gu, " ").trim();
+  const promptSentences = WHISPER_STYLE_PROMPT.split(/[.!?]+/).map(norm).filter(Boolean);
+  const normText = norm(text);
+  const echoed = promptSentences.filter((s) => s.length > 12 && normText.includes(s)).length;
+  if (echoed >= 2) return "prompt_echo";
+
+  // 3. Degenerate repetition ("Beispiele 2,5. Beispiele 2,5. …").
+  const sentences = text.split(/[.!?]+/).map(norm).filter(Boolean);
+  if (sentences.length >= 3) {
+    const unique = new Set(sentences).size;
+    if (unique / sentences.length <= 0.4) return "repetition";
+  }
+
+  return null;
 }
 
 function guessFileName(mime: string): string {

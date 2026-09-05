@@ -1,5 +1,7 @@
 import Link from "next/link";
 import { ArrowRight, Upload } from "lucide-react";
+import { AdminLogin } from "@/components/admin-login.client";
+import { isAdminSession } from "@/lib/admin-auth";
 import { getAllRaceEvents } from "@/lib/dal/races";
 import { cn, formatDateDe } from "@/lib/utils";
 import { RecomputeButton } from "./recompute-button.client";
@@ -7,6 +9,8 @@ import { RecomputeButton } from "./recompute-button.client";
 export const dynamic = "force-dynamic";
 
 export default async function AdminIndexPage() {
+  if (!(await isAdminSession())) return <AdminLogin />;
+
   const events = await getAllRaceEvents();
 
   return (
