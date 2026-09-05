@@ -1,18 +1,68 @@
 import Link from "next/link";
 import { Calendar, Flag, Medal, Trophy, Zap } from "lucide-react";
 import { getActiveAgeClasses, getAllRaceEvents } from "@/lib/dal/races";
+import { getEndlaufEvents } from "@/lib/dal/endlauf26";
+import { ENDLAUF26_LABELS, ENDLAUF26_SLUGS } from "@/lib/endlauf26/ranking";
+import { formatFactor } from "@/lib/endlauf26/format";
 import { cn, formatDateDe } from "@/lib/utils";
 
 export const dynamic = "force-dynamic";
 
 export default async function HomePage() {
-  const [events, ageClasses] = await Promise.all([
+  const [events, ageClasses, endlaufEvents] = await Promise.all([
     getAllRaceEvents(),
     getActiveAgeClasses(),
+    getEndlaufEvents(),
   ]);
+  const hmjEvents = endlaufEvents.filter((e) => e.championship === "hmj");
+  const adacEvents = endlaufEvents.filter((e) => e.championship === "adac_hth");
+  const endlaufLive = endlaufEvents.some((e) => e.status === "live");
 
   return (
-    <div className="space-y-6">
+    <div className="space-y-10">
+      <section className="space-y-4">
+        <header>
+          <h1 className="text-2xl font-semibold">Endläufe 2026</h1>
+          <p className="text-sm text-[var(--color-muted)]">
+            hmj Hessische Meisterschaft · ADAC Hessen-Thüringen (Nord · Süd · Ost)
+          </p>
+        </header>
+
+        <div className="grid grid-cols-1 gap-3 sm:grid-cols-3">
+          <QuickLink
+            href={`/endlauf26/${ENDLAUF26_SLUGS.hmj}`}
+            icon={<Trophy className="h-4 w-4" />}
+            label={ENDLAUF26_LABELS.hmj.short}
+            hint="Hessische Meisterschaft · Zwischenstand"
+          />
+          <QuickLink
+            href={`/endlauf26/${ENDLAUF26_SLUGS.adac_hth}`}
+            icon={<Trophy className="h-4 w-4" />}
+            label={ENDLAUF26_LABELS.adac_hth.short}
+            hint="Endläufe Nord · Süd · Ost · Zwischenstand"
+          />
+          <QuickLink
+            href="/endlauf26/live"
+            icon={<Zap className={cn("h-4 w-4", endlaufLive && "animate-pulse")} />}
+            label="Endlauf Live Timing"
+            hint={endlaufLive ? "läuft gerade" : "aktive Klasse · Live-Positionen"}
+            accent
+          />
+        </div>
+
+        <EndlaufRow
+          title="Endläufe hmj"
+          base={`/endlauf26/${ENDLAUF26_SLUGS.hmj}`}
+          events={hmjEvents}
+        />
+        <EndlaufRow
+          title="Endläufe ADAC"
+          base={`/endlauf26/${ENDLAUF26_SLUGS.adac_hth}`}
+          events={adacEvents}
+        />
+      </section>
+
+      <div className="space-y-6">
       <header>
         <h1 className="text-2xl font-semibold">Saison 2026</h1>
         <p className="text-sm text-[var(--color-muted)]">
@@ -104,6 +154,64 @@ export default async function HomePage() {
           ))}
         </div>
       </section>
+      </div>
+    </div>
+  );
+}
+
+function EndlaufRow({
+  title,
+  base,
+  events,
+}: {
+  title: string;
+  base: string;
+  events: {
+    id: number;
+    slug: string;
+    name: string;
+    number: number;
+    factor: number;
+    eventDate: string | null;
+    status: "upcoming" | "live" | "completed";
+  }[];
+}) {
+  return (
+    <div>
+      <h2 className="mb-2 text-sm font-semibold tracking-wider text-[var(--color-muted)] uppercase">
+        {title}
+      </h2>
+      <div className="grid grid-cols-1 gap-3 sm:grid-cols-3">
+        {events.length === 0 && (
+          <p className="text-sm text-[var(--color-muted)]">
+            Noch keine Endläufe angelegt (<code>make seed-endlauf26</code>).
+          </p>
+        )}
+        {events.map((e) => (
+          <Link
+            key={e.id}
+            href={`${base}/events/${e.slug}`}
+            className={cn(
+              "rounded-lg border bg-[var(--color-surface)] p-3 transition-colors hover:bg-[var(--color-surface-2)]",
+              e.status === "live" ? "border-[var(--color-live)]/60" : "border-[var(--color-border)]",
+            )}
+          >
+            <div className="flex items-center justify-between text-xs text-[var(--color-muted)]">
+              <span>
+                Endlauf {e.number}
+                {e.eventDate ? ` · ${formatDateDe(e.eventDate)}` : ""}
+              </span>
+              <StatusBadge status={e.status} />
+            </div>
+            <div className="mt-1 font-semibold">{e.name}</div>
+            {e.factor !== 1 && (
+              <div className="mt-2 text-xs">
+                <Tag tone="hmj">Punkte {formatFactor(e.factor)}</Tag>
+              </div>
+            )}
+          </Link>
+        ))}
+      </div>
     </div>
   );
 }

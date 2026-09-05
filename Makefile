@@ -19,8 +19,8 @@ DATABASE_URL ?= postgresql://$(POSTGRES_USER):$(POSTGRES_PASSWORD)@$(POSTGRES_HO
 export POSTGRES_HOST POSTGRES_PORT POSTGRES_DB POSTGRES_USER POSTGRES_PASSWORD DATABASE_URL
 
 .PHONY: create-server-dir check-deploy-vars provision deploy serverup server-db-push server-db-seed \
-	server-db-fix-names start-db stop-db install dev dev-webapp dev-db seed-db push-db fix-names \
-	reset-db build up down logs
+	server-db-seed-endlauf26 server-db-fix-names start-db stop-db install dev dev-webapp dev-db \
+	seed-db seed-endlauf26 parse-endlauf26 push-db fix-names reset-db build up down logs
 
 # For a new installation copy needed files to the server
 # NOTE: The scp/rsync command requires that the destination directory already exists on the remote server.
@@ -75,6 +75,12 @@ server-db-seed: check-deploy-vars
 		cd $(SERVER_PROJECT_PATH) && \
 		docker compose -f $(SERVER_DOCKER_COMPOSE) --env-file $(SERVER_ENV_FILE) exec -T webapp npm run db:seed"
 
+# Endläufe 2026: seed the separate hmj / ADAC Hessen-Thüringen data set (idempotent).
+server-db-seed-endlauf26: check-deploy-vars
+	ssh $(SERVER_USER)@$(SERVER_HOST) "\
+		cd $(SERVER_PROJECT_PATH) && \
+		docker compose -f $(SERVER_DOCKER_COMPOSE) --env-file $(SERVER_ENV_FILE) exec -T webapp npm run db:seed-endlauf26"
+
 # One-off repair for drivers with hyphenated names (e.g. Peruga-Kaminska, Jack-Leon).
 # Derives affected rows from race-drivers.txt; idempotent — safe to re-run.
 server-db-fix-names: check-deploy-vars
@@ -104,6 +110,21 @@ push-db:
 
 seed-db:
 	cd webapp && npm run db:seed
+
+# Endläufe 2026 (hmj + ADAC Hessen-Thüringen) from data/endlauf26/*.json
+seed-endlauf26:
+	cd webapp && npm run db:seed-endlauf26
+
+# Regenerate data/endlauf26/*.json from the official PDFs in data/endlauf26/source/.
+# Needs python3 with pdfplumber: python3 -m venv .venv && .venv/bin/pip install pdfplumber
+PDFPY ?= python3
+parse-endlauf26:
+	$(PDFPY) webapp/scripts/endlauf26/parse-pdfs.py \
+		--hmj data/endlauf26/source/2026_hmj_KS_Hessische_Meisterschaft_Zwischenstand.pdf \
+		--adac Süd=data/endlauf26/source/JKS-Sued-260816.pdf \
+		--adac Nord=data/endlauf26/source/JKS-Nord-260816.pdf \
+		--adac Ost=data/endlauf26/source/JKS-Ost_260831.pdf \
+		--out data/endlauf26
 
 fix-names:
 	cd webapp && npm run db:fix-names

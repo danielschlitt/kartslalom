@@ -5,7 +5,7 @@ const databaseUrl = process.env.DATABASE_URL;
 if (!databaseUrl) throw new Error("ENV ERROR - DATABASE_URL is missing");
 
 export default defineConfig({
-  schema: "./src/db/schema.ts",
+  schema: ["./src/db/schema.ts", "./src/db/schema-endlauf26.ts"],
   out: "./src/db/migrations",
   dialect: "postgresql",
   dbCredentials: { url: databaseUrl },

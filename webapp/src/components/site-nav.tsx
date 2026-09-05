@@ -5,6 +5,7 @@ import { usePathname } from "next/navigation";
 import { useEffect, useState } from "react";
 import {
   Flag,
+  Medal,
   Menu,
   Settings,
   Trophy,
@@ -17,6 +18,7 @@ import { cn } from "@/lib/utils";
 
 const NAV_ITEMS: { href: string; label: string; icon: LucideIcon }[] = [
   { href: "/", label: "Rennen", icon: Flag },
+  { href: "/endlauf26/hmj", label: "Endläufe", icon: Medal },
   { href: "/championship", label: "Meisterschaft", icon: Trophy },
   { href: "/teams", label: "Vereine", icon: Users },
   { href: "/live", label: "Live", icon: Zap },

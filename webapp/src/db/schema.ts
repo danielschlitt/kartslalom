@@ -229,3 +229,6 @@ export const runsRelations = relations(runs, ({ one }) => ({
     references: [raceEntries.id],
   }),
 }));
+
+// Endläufe 2026 (separate data set, see schema-endlauf26.ts)
+export * from "./schema-endlauf26";
