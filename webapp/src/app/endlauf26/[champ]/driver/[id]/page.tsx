@@ -1,5 +1,6 @@
 import Link from "next/link";
 import { notFound } from "next/navigation";
+import { AiPrediction } from "@/components/endlauf26/ai-prediction.client";
 import { ChampHeader } from "@/components/endlauf26/champ-header";
 import { EndlaufChampionshipTable } from "@/components/endlauf26/championship-table";
 import { Movement } from "@/components/endlauf26/movement";
@@ -119,6 +120,8 @@ export default async function EndlaufDriverPage({
           </tbody>
         </table>
       </div>
+
+      <AiPrediction driverId={driverId} />
 
       <section className="space-y-2">
         <h2 className="text-sm font-semibold tracking-wider text-[var(--color-muted)] uppercase">

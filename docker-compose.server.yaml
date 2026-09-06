@@ -18,6 +18,7 @@ services:
       - OPENAI_TRANSCRIBE_MODEL=${OPENAI_TRANSCRIBE_MODEL:-whisper-1}
       - OPENAI_EXTRACT_MODEL=${OPENAI_EXTRACT_MODEL:-gpt-4o-mini}
       - OPENAI_VISION_MODEL=${OPENAI_VISION_MODEL:-gpt-5.6}
+      - OPENAI_PREDICTION_MODEL=${OPENAI_PREDICTION_MODEL:-gpt-5.6}
     networks:
       - proxy
       - internal

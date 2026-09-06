@@ -19,7 +19,7 @@ DATABASE_URL ?= postgresql://$(POSTGRES_USER):$(POSTGRES_PASSWORD)@$(POSTGRES_HO
 # Next.js only reads webapp/.env, not the repo-root .env — so pass the app
 # secrets from .env through the environment (shell env wins over .env files).
 export POSTGRES_HOST POSTGRES_PORT POSTGRES_DB POSTGRES_USER POSTGRES_PASSWORD DATABASE_URL
-export ADMIN_TOKEN OPENAI_API_KEY OPENAI_TRANSCRIBE_MODEL OPENAI_EXTRACT_MODEL OPENAI_VISION_MODEL
+export ADMIN_TOKEN OPENAI_API_KEY OPENAI_TRANSCRIBE_MODEL OPENAI_EXTRACT_MODEL OPENAI_VISION_MODEL OPENAI_PREDICTION_MODEL
 
 .PHONY: create-server-dir check-deploy-vars provision deploy serverup server-db-push server-db-seed \
 	server-db-seed-endlauf26 server-db-fix-names start-db stop-db install dev dev-webapp dev-db \

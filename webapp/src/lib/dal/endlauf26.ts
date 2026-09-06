@@ -6,6 +6,7 @@ import {
   endlauf26Drivers,
   endlauf26Entries,
   endlauf26Events,
+  endlauf26Predictions,
   endlauf26ResultImages,
   endlauf26Results,
   endlauf26SeasonResults,
@@ -1094,4 +1095,37 @@ export async function deleteDocument(id: number): Promise<boolean> {
     .where(eq(endlauf26Documents.id, id))
     .returning({ id: endlauf26Documents.id });
   return res.length > 0;
+}
+
+/* ───────────────────────── AI prediction cache ───────────────────────── */
+
+export interface CachedPrediction {
+  stateHash: string;
+  text: string;
+  model: string;
+  createdAt: string;
+}
+
+export async function getCachedPrediction(driverId: number): Promise<CachedPrediction | null> {
+  const [row] = await db
+    .select()
+    .from(endlauf26Predictions)
+    .where(eq(endlauf26Predictions.driverId, driverId))
+    .limit(1);
+  return row ? { ...row, createdAt: row.createdAt.toISOString() } : null;
+}
+
+export async function saveCachedPrediction(p: {
+  driverId: number;
+  stateHash: string;
+  text: string;
+  model: string;
+}): Promise<void> {
+  await db
+    .insert(endlauf26Predictions)
+    .values(p)
+    .onConflictDoUpdate({
+      target: endlauf26Predictions.driverId,
+      set: { stateHash: p.stateHash, text: p.text, model: p.model, createdAt: new Date() },
+    });
 }

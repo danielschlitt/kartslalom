@@ -129,6 +129,18 @@ penalties), **Nur Fehler** (by penalty seconds, tie → Gesamtzeit) — with a D
 column to the leader or, after clicking a row, to that driver. Rows link to the
 photo of the list.
 
+### AI Prediction (driver page)
+
+Below the results card on `/endlauf26/[champ]/driver/[id]` a short German
+paragraph says what is still possible in the standings. The numbers are not
+guessed by the model: `lib/endlauf26/prediction.ts` simulates the remaining
+Endläufe (driver wins everything; per rival the worst finish they can afford
+and still stay ahead; "realistic" = no rival finishes more than 5 places below
+their current rank; risk from behind) and OpenAI (`OPENAI_PREDICTION_MODEL`,
+default `gpt-5.6`) only phrases those facts. The text is cached per driver in
+`endlauf26_predictions` and regenerated when the standings change. Without an
+API key a rule-based sentence is shown instead.
+
 ### Source PDFs
 
 The standings PDFs the field was derived from are stored in the database

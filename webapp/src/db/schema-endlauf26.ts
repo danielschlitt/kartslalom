@@ -297,6 +297,21 @@ export const endlauf26Documents = pgTable(
   (t) => [unique("endlauf26_documents_champ_key_unique").on(t.championship, t.key)],
 );
 
+/**
+ * Cached AI prediction text per driver. `stateHash` fingerprints the facts
+ * the text was generated from (standings, remaining events); a mismatch
+ * means the standings changed and the text is regenerated on next view.
+ */
+export const endlauf26Predictions = pgTable("endlauf26_predictions", {
+  driverId: integer("driver_id")
+    .primaryKey()
+    .references(() => endlauf26Drivers.id, { onDelete: "cascade" }),
+  stateHash: text("state_hash").notNull(),
+  text: text("text").notNull(),
+  model: text("model").notNull(),
+  createdAt: timestamp("created_at").defaultNow().notNull(),
+});
+
 /* Relations */
 
 export const endlauf26TeamsRelations = relations(endlauf26Teams, ({ many }) => ({
