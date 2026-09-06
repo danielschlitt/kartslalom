@@ -1,17 +1,19 @@
 import "server-only";
-import { and, asc, eq, inArray, isNotNull, or, sql } from "drizzle-orm";
+import { and, asc, desc, eq, inArray, isNotNull, or, sql } from "drizzle-orm";
 import { db } from "@/db/drizzle";
 import {
+  endlauf26Documents,
   endlauf26Drivers,
   endlauf26Entries,
   endlauf26Events,
-  endlauf26Finalizations,
+  endlauf26ResultImages,
+  endlauf26Results,
   endlauf26SeasonResults,
   endlauf26Teams,
 } from "@/db/schema";
 import {
   computeEndlauf26Championship,
-  finalizeEndlaufClass,
+  pointsForPlace,
   rankEndlaufEntries,
   type Endlauf26Championship,
   type Endlauf26Row,
@@ -20,6 +22,12 @@ import {
   type EndlaufEventInfo,
   type EndlaufRankable,
 } from "@/lib/endlauf26/ranking";
+import type {
+  EndlaufResultImageMeta,
+  EndlaufResultImportItem,
+  EndlaufResultRow,
+  PoolDriver,
+} from "@/lib/endlauf26/results-types";
 
 export type EndlaufEventStatus = "upcoming" | "live" | "completed";
 
@@ -122,7 +130,7 @@ export function toEventInfo(e: EndlaufEvent): EndlaufEventInfo {
 
 /**
  * The Endlauf field: drivers qualified via the standings list plus
- * Nachnominierungen. Everything else in `endlauf26_drivers` is a
+ * Nachrücker (nominated). Everything else in `endlauf26_drivers` is a
  * replacement candidate and must not show up anywhere public.
  */
 const inFieldCondition = or(
@@ -130,7 +138,11 @@ const inFieldCondition = or(
   eq(endlauf26Drivers.nominated, true),
 );
 
-/* ───────────────────────────── entries ───────────────────────────── */
+function num(v: string | null): number | null {
+  return v === null ? null : Number(v);
+}
+
+/* ───────────────────────── live timing entries ───────────────────────── */
 
 export interface EndlaufEntry extends EndlaufRankable {
   firstName: string;
@@ -139,18 +151,13 @@ export interface EndlaufEntry extends EndlaufRankable {
   verband: string | null;
   region: string | null;
   seasonPosition: number | null;
+  qualified: boolean;
   withdrawn: boolean;
   nominated: boolean;
   startingOrder: number | null;
   positionRun1: number | null;
   positionRun2: number | null;
   positionLive: number | null;
-  finishPosition: number | null;
-  pointsAwarded: number;
-}
-
-function num(v: string | null): number | null {
-  return v === null ? null : Number(v);
 }
 
 function entryRuns(e: typeof endlauf26Entries.$inferSelect): EndlaufEntryRuns {
@@ -164,11 +171,11 @@ function entryRuns(e: typeof endlauf26Entries.$inferSelect): EndlaufEntryRuns {
 }
 
 /**
- * Entries of an event (optionally one age class), start-list order.
+ * Live-timing entries of an event (optionally one age class), start-list order.
  *
  * Withdrawn drivers are hidden by default — they must not appear in start
- * lists or live boards. Ranking/finalization pass `includeWithdrawn` so a
- * driver who set a time before withdrawing keeps a consistent position.
+ * lists or live boards. Ranking passes `includeWithdrawn` so a driver who
+ * set a time before withdrawing keeps a consistent position.
  */
 export async function getEndlaufEntriesForEvent(
   eventId: number,
@@ -183,6 +190,7 @@ export async function getEndlaufEntriesForEvent(
       verband: endlauf26Drivers.verband,
       region: endlauf26Drivers.region,
       seasonPosition: endlauf26Drivers.seasonPosition,
+      qualified: endlauf26Drivers.qualified,
       withdrawn: endlauf26Drivers.withdrawn,
       nominated: endlauf26Drivers.nominated,
       teamName: endlauf26Teams.name,
@@ -215,23 +223,14 @@ export async function getEndlaufEntriesForEvent(
     verband: r.verband,
     region: r.region,
     seasonPosition: r.seasonPosition,
+    qualified: r.qualified,
     withdrawn: r.withdrawn,
     nominated: r.nominated,
     startingOrder: r.entry.startingOrder,
     positionRun1: r.entry.positionRun1,
     positionRun2: r.entry.positionRun2,
     positionLive: r.entry.positionLive,
-    finishPosition: r.entry.finishPosition,
-    pointsAwarded: r.entry.pointsAwarded,
   }));
-}
-
-export async function getFinalizedClasses(eventId: number): Promise<Set<number>> {
-  const rows = await db
-    .select({ ageClass: endlauf26Finalizations.ageClass })
-    .from(endlauf26Finalizations)
-    .where(eq(endlauf26Finalizations.eventId, eventId));
-  return new Set(rows.map((r) => r.ageClass));
 }
 
 /**
@@ -258,32 +257,359 @@ export async function recomputeLivePositions(eventId: number, ageClass: number) 
   return positions;
 }
 
-/**
- * Derive official finish positions + base points for a finalized class and
- * store them. Returns number of entries written.
- */
-export async function writeFinalResults(eventId: number, ageClass: number) {
-  const entries = await getEndlaufEntriesForEvent(eventId, ageClass, {
-    includeWithdrawn: true,
+/* ───────────────────────── official results ───────────────────────── */
+
+function mapResult(
+  r: typeof endlauf26Results.$inferSelect,
+  d: {
+    firstName: string;
+    lastName: string;
+    teamName: string;
+    qualified: boolean;
+    nominated: boolean;
+    withdrawn: boolean;
+  },
+): EndlaufResultRow {
+  return {
+    id: r.id,
+    eventId: r.eventId,
+    driverId: r.driverId,
+    ageClass: r.ageClass,
+    position: r.position,
+    startPosition: r.startPosition,
+    wertung: r.wertung,
+    testTime: num(r.testTime),
+    run1Time: num(r.run1Time),
+    run1Penalty: r.run1Penalty,
+    run2Time: num(r.run2Time),
+    run2Penalty: r.run2Penalty,
+    totalPenalty: r.totalPenalty,
+    totalTime: num(r.totalTime),
+    points: r.points,
+    sheetTeam: r.sheetTeam,
+    sheetAdacId: r.sheetAdacId,
+    warnings: Array.isArray(r.warnings) ? r.warnings : [],
+    imageId: r.imageId,
+    firstName: d.firstName,
+    lastName: d.lastName,
+    teamName: d.teamName,
+    qualified: d.qualified,
+    nominated: d.nominated,
+    withdrawn: d.withdrawn,
+  };
+}
+
+/** Official results of an event (optionally one class), ordered by printed position. */
+export async function getEndlaufResults(
+  eventId: number,
+  ageClass?: number,
+): Promise<EndlaufResultRow[]> {
+  const rows = await db
+    .select({
+      r: endlauf26Results,
+      firstName: endlauf26Drivers.firstName,
+      lastName: endlauf26Drivers.lastName,
+      qualified: endlauf26Drivers.qualified,
+      nominated: endlauf26Drivers.nominated,
+      withdrawn: endlauf26Drivers.withdrawn,
+      teamName: endlauf26Teams.name,
+    })
+    .from(endlauf26Results)
+    .innerJoin(endlauf26Drivers, eq(endlauf26Drivers.id, endlauf26Results.driverId))
+    .innerJoin(endlauf26Teams, eq(endlauf26Teams.id, endlauf26Drivers.teamId))
+    .where(
+      and(
+        eq(endlauf26Results.eventId, eventId),
+        ageClass === undefined ? undefined : eq(endlauf26Results.ageClass, ageClass),
+      ),
+    )
+    .orderBy(
+      asc(endlauf26Results.ageClass),
+      sql`${endlauf26Results.position} nulls last`,
+      asc(endlauf26Drivers.lastName),
+    );
+  return rows.map(({ r, ...d }) => mapResult(r, d));
+}
+
+/** Age classes of an event with an imported result list (= scored). */
+export async function getScoredClasses(eventId: number): Promise<Set<number>> {
+  const rows = await db
+    .selectDistinct({ ageClass: endlauf26Results.ageClass })
+    .from(endlauf26Results)
+    .where(eq(endlauf26Results.eventId, eventId));
+  return new Set(rows.map((r) => r.ageClass));
+}
+
+export async function getResultImages(
+  eventId: number,
+  ageClass?: number,
+): Promise<EndlaufResultImageMeta[]> {
+  const rows = await db
+    .select({
+      id: endlauf26ResultImages.id,
+      eventId: endlauf26ResultImages.eventId,
+      ageClass: endlauf26ResultImages.ageClass,
+      mime: endlauf26ResultImages.mime,
+      size: endlauf26ResultImages.size,
+      uploadedAt: endlauf26ResultImages.uploadedAt,
+      rowCount: sql<number>`(select count(*)::int from ${endlauf26Results} where ${endlauf26Results.imageId} = ${endlauf26ResultImages.id})`,
+    })
+    .from(endlauf26ResultImages)
+    .where(
+      and(
+        eq(endlauf26ResultImages.eventId, eventId),
+        ageClass === undefined ? undefined : eq(endlauf26ResultImages.ageClass, ageClass),
+      ),
+    )
+    .orderBy(asc(endlauf26ResultImages.ageClass), asc(endlauf26ResultImages.uploadedAt));
+  return rows.map((r) => ({ ...r, uploadedAt: r.uploadedAt.toISOString() }));
+}
+
+export async function getResultImage(id: number) {
+  const [row] = await db
+    .select()
+    .from(endlauf26ResultImages)
+    .where(eq(endlauf26ResultImages.id, id))
+    .limit(1);
+  return row ?? null;
+}
+
+export async function deleteResultImage(id: number): Promise<boolean> {
+  const res = await db
+    .delete(endlauf26ResultImages)
+    .where(eq(endlauf26ResultImages.id, id))
+    .returning({ id: endlauf26ResultImages.id });
+  return res.length > 0;
+}
+
+/** Remove the whole imported result list of one class (rows + photos). */
+export async function deleteClassResults(eventId: number, ageClass: number) {
+  return db.transaction(async (tx) => {
+    const rows = await tx
+      .delete(endlauf26Results)
+      .where(and(eq(endlauf26Results.eventId, eventId), eq(endlauf26Results.ageClass, ageClass)))
+      .returning({ id: endlauf26Results.id });
+    const imgs = await tx
+      .delete(endlauf26ResultImages)
+      .where(
+        and(
+          eq(endlauf26ResultImages.eventId, eventId),
+          eq(endlauf26ResultImages.ageClass, ageClass),
+        ),
+      )
+      .returning({ id: endlauf26ResultImages.id });
+    return { rows: rows.length, images: imgs.length };
   });
-  const results = finalizeEndlaufClass(entries);
-  const live = rankEndlaufEntries(entries);
+}
+
+/**
+ * Every driver of (championship, class) — the field and the Nachrücker pool —
+ * as matching candidates for a photographed result list of `eventId`.
+ */
+export async function getClassPool(
+  championship: Endlauf26Championship,
+  ageClass: number,
+  eventId: number,
+): Promise<PoolDriver[]> {
+  const rows = await db
+    .select({
+      d: endlauf26Drivers,
+      teamName: endlauf26Teams.name,
+      startingOrder: endlauf26Entries.startingOrder,
+    })
+    .from(endlauf26Drivers)
+    .innerJoin(endlauf26Teams, eq(endlauf26Teams.id, endlauf26Drivers.teamId))
+    .leftJoin(
+      endlauf26Entries,
+      and(
+        eq(endlauf26Entries.driverId, endlauf26Drivers.id),
+        eq(endlauf26Entries.eventId, eventId),
+      ),
+    )
+    .where(
+      and(
+        eq(endlauf26Drivers.championship, championship),
+        eq(endlauf26Drivers.ageClass, ageClass),
+      ),
+    )
+    .orderBy(
+      desc(endlauf26Drivers.qualified),
+      desc(endlauf26Drivers.nominated),
+      asc(endlauf26Drivers.seasonPosition),
+      asc(endlauf26Drivers.lastName),
+    );
+  return rows.map(({ d, teamName, startingOrder }) => ({
+    driverId: d.id,
+    firstName: d.firstName,
+    lastName: d.lastName,
+    teamName,
+    adacId: d.adacId,
+    qualified: d.qualified,
+    nominated: d.nominated,
+    withdrawn: d.withdrawn,
+    startingOrder: startingOrder ?? null,
+  }));
+}
+
+export interface ImportOutcome {
+  written: number;
+  imageId: number | null;
+  /** Drivers that were not in the field and are now Nachrücker. */
+  nominated: string[];
+  /** Withdrawn drivers that appeared on the list and were re-activated. */
+  reactivated: string[];
+  /** Drivers whose Ausweis-Nr. was filled in from the list. */
+  adacIdsSet: number;
+}
+
+export type ImportError = "invalid_driver" | "driver_wrong_class";
+
+/**
+ * Write reviewed rows of a result list. Existing rows of the same drivers are
+ * replaced (a class may span two photos — rows of other drivers stay), the
+ * photo is stored, non-field drivers become Nachrücker, withdrawn drivers are
+ * re-activated, missing Ausweis numbers / Wertung are filled in on the driver.
+ */
+export async function importEndlaufResults(
+  event: EndlaufEvent,
+  ageClass: number,
+  items: EndlaufResultImportItem[],
+  image: { mime: string; data: Buffer } | null,
+): Promise<{ ok: true; outcome: ImportOutcome } | { ok: false; error: ImportError }> {
+  const driverIds = items.map((i) => i.driverId);
+  const drivers = driverIds.length
+    ? await db
+        .select()
+        .from(endlauf26Drivers)
+        .where(inArray(endlauf26Drivers.id, driverIds))
+    : [];
+  const byId = new Map(drivers.map((d) => [d.id, d]));
+  for (const id of driverIds) {
+    const d = byId.get(id);
+    if (!d || d.championship !== event.championship) return { ok: false, error: "invalid_driver" };
+    if (d.ageClass !== ageClass) return { ok: false, error: "driver_wrong_class" };
+  }
+
+  const fmt = (t: number | null) => (t === null ? null : t.toFixed(3));
+  const outcome: ImportOutcome = {
+    written: 0,
+    imageId: null,
+    nominated: [],
+    reactivated: [],
+    adacIdsSet: 0,
+  };
+
   await db.transaction(async (tx) => {
-    for (const r of results) {
-      const l = live.find((x) => x.entryId === r.entryId)!;
-      await tx
-        .update(endlauf26Entries)
-        .set({
-          finishPosition: r.finishPosition,
-          pointsAwarded: r.pointsAwarded,
-          positionRun1: l.positionRun1,
-          positionRun2: l.positionRun2,
-          positionLive: l.positionLive,
+    if (image) {
+      const [img] = await tx
+        .insert(endlauf26ResultImages)
+        .values({
+          eventId: event.id,
+          ageClass,
+          mime: image.mime,
+          size: image.data.byteLength,
+          data: image.data,
         })
-        .where(eq(endlauf26Entries.id, r.entryId));
+        .returning({ id: endlauf26ResultImages.id });
+      outcome.imageId = img.id;
+    }
+
+    for (const it of items) {
+      const values = {
+        eventId: event.id,
+        driverId: it.driverId,
+        ageClass,
+        position: it.position,
+        startPosition: it.startPosition,
+        wertung: it.wertung,
+        testTime: fmt(it.testTime),
+        run1Time: fmt(it.run1Time),
+        run1Penalty: it.run1Penalty,
+        run2Time: fmt(it.run2Time),
+        run2Penalty: it.run2Penalty,
+        totalPenalty: it.totalPenalty,
+        totalTime: fmt(it.totalTime),
+        points: it.points,
+        sheetTeam: it.sheetTeam,
+        sheetAdacId: it.sheetAdacId,
+        warnings: it.warnings,
+        imageId: outcome.imageId,
+        importedAt: new Date(),
+      };
+      await tx
+        .insert(endlauf26Results)
+        .values(values)
+        .onConflictDoUpdate({
+          target: [endlauf26Results.eventId, endlauf26Results.driverId],
+          set: { ...values },
+        });
+      outcome.written += 1;
+
+      const d = byId.get(it.driverId)!;
+      const patch: Partial<typeof endlauf26Drivers.$inferInsert> = {};
+      if (!d.adacId && it.sheetAdacId) {
+        patch.adacId = it.sheetAdacId;
+        outcome.adacIdsSet += 1;
+      }
+      if (it.wertung && d.wertung !== it.wertung) patch.wertung = it.wertung;
+      if (Object.keys(patch).length > 0) {
+        await tx.update(endlauf26Drivers).set(patch).where(eq(endlauf26Drivers.id, d.id));
+      }
     }
   });
-  return results.length;
+
+  // Field changes outside the transaction — they renumber start lists etc.
+  for (const it of items) {
+    const d = byId.get(it.driverId)!;
+    if (!d.qualified && !d.nominated) {
+      await setEndlaufDriverNominated(d.id, true);
+      outcome.nominated.push(`${d.lastName} ${d.firstName}`);
+    } else if (d.withdrawn) {
+      await setEndlaufDriverWithdrawn(d.id, false);
+      outcome.reactivated.push(`${d.lastName} ${d.firstName}`);
+    }
+  }
+
+  return { ok: true, outcome };
+}
+
+/**
+ * Start from scratch for one Endlauf: official results and photos are
+ * deleted, live times are cleared, the live state is reset. Drivers, the
+ * field (Nachrücker/Abmeldungen) and start orders are kept.
+ */
+export async function resetEndlaufEvent(eventId: number) {
+  return db.transaction(async (tx) => {
+    const results = await tx
+      .delete(endlauf26Results)
+      .where(eq(endlauf26Results.eventId, eventId))
+      .returning({ id: endlauf26Results.id });
+    const images = await tx
+      .delete(endlauf26ResultImages)
+      .where(eq(endlauf26ResultImages.eventId, eventId))
+      .returning({ id: endlauf26ResultImages.id });
+    const entries = await tx
+      .update(endlauf26Entries)
+      .set({
+        testTime: null,
+        testPenalty: 0,
+        run1Time: null,
+        run1Penalty: 0,
+        run2Time: null,
+        run2Penalty: 0,
+        positionRun1: null,
+        positionRun2: null,
+        positionLive: null,
+        updatedAt: new Date(),
+      })
+      .where(eq(endlauf26Entries.eventId, eventId))
+      .returning({ id: endlauf26Entries.id });
+    await tx
+      .update(endlauf26Events)
+      .set({ status: "upcoming", liveAgeClass: null, liveEntryId: null })
+      .where(eq(endlauf26Events.id, eventId));
+    return { results: results.length, images: images.length, entries: entries.length };
+  });
 }
 
 /* ─────────────────────────── championship ─────────────────────────── */
@@ -293,8 +619,8 @@ export interface EndlaufChampionshipData {
   events: EndlaufEvent[];
   drivers: EndlaufDriverInput[];
   rows: Endlauf26Row[];
-  /** eventId → set of finalized age classes */
-  finalized: Map<number, Set<number>>;
+  /** eventId → set of age classes with an imported result list */
+  scored: Map<number, Set<number>>;
 }
 
 export async function getEndlaufChampionship(
@@ -316,42 +642,51 @@ export async function getEndlaufChampionship(
 
   const driverIds = driverRows.map((r) => r.d.id);
   if (driverIds.length === 0) {
-    return { championship, events, drivers: [], rows: [], finalized: new Map() };
+    return { championship, events, drivers: [], rows: [], scored: new Map() };
   }
 
-  const [seasonRows, entryRows, finalRows] = await Promise.all([
+  const [seasonRows, resultRows] = await Promise.all([
     db
       .select()
       .from(endlauf26SeasonResults)
       .where(inArray(endlauf26SeasonResults.driverId, driverIds)),
     eventIds.length
       ? db
-          .select()
-          .from(endlauf26Entries)
-          .where(inArray(endlauf26Entries.eventId, eventIds))
-      : Promise.resolve([] as (typeof endlauf26Entries.$inferSelect)[]),
-    eventIds.length
-      ? db
-          .select()
-          .from(endlauf26Finalizations)
-          .where(inArray(endlauf26Finalizations.eventId, eventIds))
-      : Promise.resolve([] as (typeof endlauf26Finalizations.$inferSelect)[]),
+          .select({
+            eventId: endlauf26Results.eventId,
+            driverId: endlauf26Results.driverId,
+            ageClass: endlauf26Results.ageClass,
+            position: endlauf26Results.position,
+            points: endlauf26Results.points,
+          })
+          .from(endlauf26Results)
+          .where(inArray(endlauf26Results.eventId, eventIds))
+      : Promise.resolve(
+          [] as {
+            eventId: number;
+            driverId: number;
+            ageClass: number;
+            position: number | null;
+            points: number | null;
+          }[],
+        ),
   ]);
 
-  const finalized = new Map<number, Set<number>>();
-  for (const f of finalRows) {
-    const s = finalized.get(f.eventId) ?? new Set<number>();
-    s.add(f.ageClass);
-    finalized.set(f.eventId, s);
+  // A class is scored at an event as soon as any result row exists for it.
+  const scored = new Map<number, Set<number>>();
+  for (const r of resultRows) {
+    const s = scored.get(r.eventId) ?? new Set<number>();
+    s.add(r.ageClass);
+    scored.set(r.eventId, s);
   }
 
   const seasonByDriver = new Map<number, typeof seasonRows>();
   for (const s of seasonRows) {
     seasonByDriver.set(s.driverId, [...(seasonByDriver.get(s.driverId) ?? []), s]);
   }
-  const entriesByDriver = new Map<number, typeof entryRows>();
-  for (const e of entryRows) {
-    entriesByDriver.set(e.driverId, [...(entriesByDriver.get(e.driverId) ?? []), e]);
+  const resultsByDriver = new Map<number, typeof resultRows>();
+  for (const r of resultRows) {
+    resultsByDriver.set(r.driverId, [...(resultsByDriver.get(r.driverId) ?? []), r]);
   }
 
   const drivers: EndlaufDriverInput[] = driverRows.map(({ d, teamName }) => ({
@@ -377,14 +712,18 @@ export async function getEndlaufChampionship(
         finishPosition: s.finishPosition,
         points: s.points,
       })),
-    endlaufResults: (entriesByDriver.get(d.id) ?? []).map((e) => ({
-      eventId: e.eventId,
-      finishPosition: e.finishPosition,
-      pointsAwarded: e.pointsAwarded,
-      started:
-        e.run1Time !== null || e.run2Time !== null || e.finishPosition !== null,
-      finalized: finalized.get(e.eventId)?.has(e.ageClass) ?? false,
-    })),
+    endlaufResults: events.map((ev) => {
+      const r = (resultsByDriver.get(d.id) ?? []).find((x) => x.eventId === ev.id) ?? null;
+      const started = r !== null && r.position !== null;
+      return {
+        eventId: ev.id,
+        finishPosition: r?.position ?? null,
+        // Printed "ADAC Punkte" are authoritative; fall back to the scale.
+        pointsAwarded: started ? (r!.points ?? pointsForPlace(r!.position)) : 0,
+        started,
+        scored: scored.get(ev.id)?.has(d.ageClass) ?? false,
+      };
+    }),
   }));
 
   const rows = computeEndlauf26Championship(
@@ -394,7 +733,7 @@ export async function getEndlaufChampionship(
     { applyDrops: opts.applyDrops },
   );
 
-  return { championship, events, drivers, rows, finalized };
+  return { championship, events, drivers, rows, scored };
 }
 
 export async function getEndlaufDriver(driverId: number) {
@@ -417,13 +756,14 @@ export interface EndlaufFieldDriver {
   ageClass: number;
   verband: string | null;
   region: string | null;
+  adacId: string | null;
   seasonPosition: number | null;
   seasonPoints: number | null;
   seasonRaces: number;
   qualified: boolean;
   withdrawn: boolean;
   nominated: boolean;
-  /** Some Endlauf time (training or Wertungslauf) is stored for this driver. */
+  /** Live times or an official result exist — the nomination can no longer be revoked. */
   hasTimes: boolean;
 }
 
@@ -440,7 +780,7 @@ const hasAnyTime = or(
 export async function getEndlaufFieldDrivers(
   championship: Endlauf26Championship,
 ): Promise<EndlaufFieldDriver[]> {
-  const [rows, timed] = await Promise.all([
+  const [rows, timed, resulted] = await Promise.all([
     db
       .select({ d: endlauf26Drivers, teamName: endlauf26Teams.name })
       .from(endlauf26Drivers)
@@ -456,8 +796,13 @@ export async function getEndlaufFieldDrivers(
       .from(endlauf26Entries)
       .innerJoin(endlauf26Events, eq(endlauf26Events.id, endlauf26Entries.eventId))
       .where(and(eq(endlauf26Events.championship, championship), hasAnyTime)),
+    db
+      .selectDistinct({ driverId: endlauf26Results.driverId })
+      .from(endlauf26Results)
+      .innerJoin(endlauf26Events, eq(endlauf26Events.id, endlauf26Results.eventId))
+      .where(eq(endlauf26Events.championship, championship)),
   ]);
-  const timedIds = new Set(timed.map((t) => t.driverId));
+  const lockedIds = new Set([...timed, ...resulted].map((t) => t.driverId));
   return rows.map(({ d, teamName }) => ({
     driverId: d.id,
     firstName: d.firstName,
@@ -466,29 +811,19 @@ export async function getEndlaufFieldDrivers(
     ageClass: d.ageClass,
     verband: d.verband,
     region: d.region,
+    adacId: d.adacId,
     seasonPosition: d.seasonPosition,
     seasonPoints: num(d.seasonPoints),
     seasonRaces: d.seasonRaces,
     qualified: d.qualified,
     withdrawn: d.withdrawn,
     nominated: d.nominated,
-    hasTimes: timedIds.has(d.id),
+    hasTimes: lockedIds.has(d.id),
   }));
 }
 
-/** Whether any entry of (event, class) already has a time or the class is finalized. */
+/** Whether any live entry of (event, class) already has a time. */
 async function classIsUnderway(eventId: number, ageClass: number): Promise<boolean> {
-  const [fin] = await db
-    .select({ id: endlauf26Finalizations.id })
-    .from(endlauf26Finalizations)
-    .where(
-      and(
-        eq(endlauf26Finalizations.eventId, eventId),
-        eq(endlauf26Finalizations.ageClass, ageClass),
-      ),
-    )
-    .limit(1);
-  if (fin) return true;
   const [timed] = await db
     .select({ id: endlauf26Entries.id })
     .from(endlauf26Entries)
@@ -504,11 +839,11 @@ async function classIsUnderway(eventId: number, ageClass: number): Promise<boole
 }
 
 /**
- * Renumber the starting order 1..n of one age class for every event of the
- * championship whose class has not started yet (no times, not finalized).
- * The relative order is preserved, so manual tweaks survive; withdrawn
- * drivers are skipped and a fresh entry with order 0 ends up first (the
- * replacement has the worst pre-Endlauf standing → starts first).
+ * Renumber the live start order 1..n of one age class for every event of the
+ * championship whose class has not started yet (no live times). The
+ * relative order is preserved, so manual tweaks survive; withdrawn drivers
+ * are skipped and a fresh entry with order 0 ends up first (the replacement
+ * has the worst pre-Endlauf standing → starts first).
  */
 async function compactStartingOrders(
   championship: Endlauf26Championship,
@@ -589,9 +924,10 @@ export async function setEndlaufDriverWithdrawn(
 }
 
 /**
- * Nominate a replacement candidate (creates its entries for every Endlauf,
+ * Nominate a Nachrücker (creates its live entries for every Endlauf,
  * starting first in classes that have not started yet) — or revoke a
- * nomination, which is only possible while no time has been recorded.
+ * nomination, which is only possible while no live time and no official
+ * result exist for the driver.
  */
 export async function setEndlaufDriverNominated(
   driverId: number,
@@ -638,6 +974,12 @@ export async function setEndlaufDriverNominated(
       .where(and(eq(endlauf26Entries.driverId, driverId), hasAnyTime))
       .limit(1);
     if (timed) return "has_times";
+    const [resulted] = await db
+      .select({ id: endlauf26Results.id })
+      .from(endlauf26Results)
+      .where(eq(endlauf26Results.driverId, driverId))
+      .limit(1);
+    if (resulted) return "has_times";
     await db.delete(endlauf26Entries).where(eq(endlauf26Entries.driverId, driverId));
     await db
       .update(endlauf26Drivers)
@@ -647,4 +989,109 @@ export async function setEndlaufDriverNominated(
 
   await compactStartingOrders(d.championship, d.ageClass);
   return "ok";
+}
+
+/* ─────────────────────────── clubs ─────────────────────────── */
+
+export async function getKnownClubs(championship: Endlauf26Championship): Promise<string[]> {
+  const rows = await db
+    .select({ name: endlauf26Teams.name })
+    .from(endlauf26Teams)
+    .where(eq(endlauf26Teams.championship, championship))
+    .orderBy(asc(endlauf26Teams.name));
+  return rows.map((r) => r.name);
+}
+
+/** Add a club that was missing from the imported lists. Idempotent. */
+export async function createClub(
+  championship: Endlauf26Championship,
+  name: string,
+): Promise<{ id: number; created: boolean }> {
+  const inserted = await db
+    .insert(endlauf26Teams)
+    .values({ championship, name })
+    .onConflictDoNothing()
+    .returning({ id: endlauf26Teams.id });
+  if (inserted[0]) return { id: inserted[0].id, created: true };
+  const [row] = await db
+    .select({ id: endlauf26Teams.id })
+    .from(endlauf26Teams)
+    .where(and(eq(endlauf26Teams.championship, championship), eq(endlauf26Teams.name, name)))
+    .limit(1);
+  return { id: row.id, created: false };
+}
+
+/* ─────────────────────────── documents ─────────────────────────── */
+
+export interface EndlaufDocumentMeta {
+  id: number;
+  championship: Endlauf26Championship;
+  key: string;
+  filename: string;
+  mime: string;
+  size: number;
+  uploadedAt: string;
+}
+
+export async function getDocuments(
+  championship: Endlauf26Championship,
+): Promise<EndlaufDocumentMeta[]> {
+  const rows = await db
+    .select({
+      id: endlauf26Documents.id,
+      championship: endlauf26Documents.championship,
+      key: endlauf26Documents.key,
+      filename: endlauf26Documents.filename,
+      mime: endlauf26Documents.mime,
+      size: endlauf26Documents.size,
+      uploadedAt: endlauf26Documents.uploadedAt,
+    })
+    .from(endlauf26Documents)
+    .where(eq(endlauf26Documents.championship, championship))
+    .orderBy(asc(endlauf26Documents.key));
+  return rows.map((r) => ({ ...r, uploadedAt: r.uploadedAt.toISOString() }));
+}
+
+export async function getDocument(id: number) {
+  const [row] = await db
+    .select()
+    .from(endlauf26Documents)
+    .where(eq(endlauf26Documents.id, id))
+    .limit(1);
+  return row ?? null;
+}
+
+export async function upsertDocument(doc: {
+  championship: Endlauf26Championship;
+  key: string;
+  filename: string;
+  mime: string;
+  data: Buffer;
+}): Promise<number> {
+  const values = {
+    championship: doc.championship,
+    key: doc.key,
+    filename: doc.filename,
+    mime: doc.mime,
+    size: doc.data.byteLength,
+    data: doc.data,
+    uploadedAt: new Date(),
+  };
+  const [row] = await db
+    .insert(endlauf26Documents)
+    .values(values)
+    .onConflictDoUpdate({
+      target: [endlauf26Documents.championship, endlauf26Documents.key],
+      set: values,
+    })
+    .returning({ id: endlauf26Documents.id });
+  return row.id;
+}
+
+export async function deleteDocument(id: number): Promise<boolean> {
+  const res = await db
+    .delete(endlauf26Documents)
+    .where(eq(endlauf26Documents.id, id))
+    .returning({ id: endlauf26Documents.id });
+  return res.length > 0;
 }

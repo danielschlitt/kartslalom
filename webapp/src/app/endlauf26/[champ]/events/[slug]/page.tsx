@@ -1,25 +1,31 @@
 import Link from "next/link";
 import { notFound } from "next/navigation";
-import { Settings } from "lucide-react";
+import { Settings, Zap } from "lucide-react";
 import { ChampHeader } from "@/components/endlauf26/champ-header";
+import { ClassResults } from "@/components/endlauf26/class-results.client";
 import { EventStatusBadge } from "@/components/endlauf26/event-status-badge";
-import { LiveBoard } from "@/components/endlauf26/live-board";
 import { isAdminSession } from "@/lib/admin-auth";
 import {
-  getEndlaufEntriesForEvent,
   getEndlaufEventBySlug,
-  getFinalizedClasses,
+  getEndlaufResults,
+  getResultImages,
 } from "@/lib/dal/endlauf26";
 import { formatFactor } from "@/lib/endlauf26/format";
 import {
   ageClassName,
   championshipFromSlug,
+  ENDLAUF26_AGE_CLASSES,
   ENDLAUF26_SLUGS,
 } from "@/lib/endlauf26/ranking";
 import { formatDateDe } from "@/lib/utils";
 
 export const dynamic = "force-dynamic";
 
+/**
+ * Public results of one Endlauf: the imported official result list per age
+ * class (source of truth) with the alternative scorings on top. Live timing
+ * lives on its own page and is only linked while the event is live.
+ */
 export default async function EndlaufEventPage({
   params,
 }: {
@@ -31,13 +37,14 @@ export default async function EndlaufEventPage({
   const event = await getEndlaufEventBySlug(championship, slug);
   if (!event) notFound();
 
-  const [entries, finalized, isAdmin] = await Promise.all([
-    getEndlaufEntriesForEvent(event.id),
-    getFinalizedClasses(event.id),
+  const [results, images, isAdmin] = await Promise.all([
+    getEndlaufResults(event.id),
+    getResultImages(event.id),
     isAdminSession(),
   ]);
-  const classes = [...new Set(entries.map((e) => e.ageClass))].sort((a, b) => a - b);
+  const scoredClasses = new Set(results.map((r) => r.ageClass));
   const base = `/endlauf26/${ENDLAUF26_SLUGS[championship]}`;
+  const adminHref = `${base}/admin/events/${event.slug}`;
 
   return (
     <div className="space-y-6">
@@ -48,7 +55,7 @@ export default async function EndlaufEventPage({
         subtitle={[
           event.eventDate ? formatDateDe(event.eventDate) : null,
           event.factor !== 1 ? `Punkte ${formatFactor(event.factor)}` : null,
-          `${finalized.size}/${classes.length} Klassen gewertet`,
+          `${scoredClasses.size}/${ENDLAUF26_AGE_CLASSES.length} Klassen gewertet`,
         ]
           .filter(Boolean)
           .join(" · ")}
@@ -58,28 +65,39 @@ export default async function EndlaufEventPage({
       <div className="flex flex-wrap items-center gap-3 text-sm">
         <EventStatusBadge status={event.status} />
         {event.status === "live" && (
-          <Link href={`${base}/live`} className="text-[var(--color-live)] hover:underline">
-            Live-Ansicht →
+          <Link
+            href={`${base}/live`}
+            className="inline-flex items-center gap-1 text-[var(--color-live)] hover:underline"
+          >
+            <Zap className="h-3.5 w-3.5 animate-pulse" /> Live-Timing →
           </Link>
         )}
         {isAdmin && (
           <Link
-            href={`${base}/admin/events/${event.slug}`}
+            href={adminHref}
             className="inline-flex items-center gap-1 text-[var(--color-muted)] hover:text-[var(--color-foreground)]"
           >
-            <Settings className="h-3.5 w-3.5" /> Zeiten erfassen
+            <Settings className="h-3.5 w-3.5" /> Ergebnislisten einlesen
           </Link>
         )}
       </div>
 
-      {classes.map((c) => (
-        <LiveBoard
+      <p className="text-xs text-[var(--color-muted)]">
+        Platz und Punkte stammen aus der fotografierten offiziellen Ergebnisliste je Klasse. Die
+        Ansichten „Nur schnellste Runde“, „Ohne Fehler“ und „Nur Fehler“ sind Was-wäre-wenn-Wertungen
+        und ändern nichts an der offiziellen Reihenfolge.
+      </p>
+
+      {ENDLAUF26_AGE_CLASSES.map((c) => (
+        <ClassResults
           key={c}
           ageClassName={ageClassName(c)}
-          entries={entries.filter((e) => e.ageClass === c)}
-          liveEntryId={event.liveAgeClass === c ? event.liveEntryId : null}
-          finalized={finalized.has(c)}
-          showPoints
+          rows={results.filter((r) => r.ageClass === c)}
+          images={images.filter((im) => im.ageClass === c)}
+          factor={event.factor}
+          driverBasePath={`${base}/driver`}
+          isAdmin={isAdmin}
+          adminHref={adminHref}
         />
       ))}
     </div>

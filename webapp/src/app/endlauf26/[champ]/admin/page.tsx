@@ -6,17 +6,21 @@ import { ChampHeader } from "@/components/endlauf26/champ-header";
 import { EventStatusBadge } from "@/components/endlauf26/event-status-badge";
 import { isAdminSession } from "@/lib/admin-auth";
 import {
+  getDocuments,
   getEndlaufEvents,
   getEndlaufFieldDrivers,
-  getFinalizedClasses,
+  getScoredClasses,
 } from "@/lib/dal/endlauf26";
+import { ENDLAUF26_DOCUMENT_SLOTS } from "@/lib/endlauf26/documents";
 import { formatFactor } from "@/lib/endlauf26/format";
 import {
   ageClassName,
   championshipFromSlug,
+  ENDLAUF26_AGE_CLASSES,
   ENDLAUF26_SLUGS,
 } from "@/lib/endlauf26/ranking";
 import { cn } from "@/lib/utils";
+import { DocumentsAdmin } from "./documents-admin.client";
 import { FieldAdmin } from "./field-admin.client";
 import { EndlaufRecomputeButton } from "./recompute-button.client";
 
@@ -40,11 +44,12 @@ export default async function EndlaufAdminIndexPage({
     );
   }
 
-  const [events, fieldDrivers] = await Promise.all([
+  const [events, fieldDrivers, documents] = await Promise.all([
     getEndlaufEvents(championship),
     getEndlaufFieldDrivers(championship),
+    getDocuments(championship),
   ]);
-  const finalized = await Promise.all(events.map((e) => getFinalizedClasses(e.id)));
+  const scored = await Promise.all(events.map((e) => getScoredClasses(e.id)));
   const slug = ENDLAUF26_SLUGS[championship];
   const base = `/endlauf26/${slug}`;
 
@@ -54,11 +59,9 @@ export default async function EndlaufAdminIndexPage({
         championship={championship}
         active="admin"
         title="Admin · Endläufe"
-        subtitle="Fahrerfeld pflegen (Abmeldungen, Nachnominierungen), Status setzen, Klasse und Fahrer aktivieren, Zeiten diktieren oder eintragen, Klassen abschließen."
+        subtitle="Ergebnislisten fotografieren und einlesen (Grundlage der Wertung), Fahrerfeld pflegen (Abmeldungen, Nachrücker), Quell-PDFs verwalten, Live-Timing als Werkzeug."
         isLive={events.some((e) => e.status === "live")}
       />
-
-      <EndlaufRecomputeButton championshipSlug={slug} />
 
       <section>
         <h2 className="mb-3 text-sm font-semibold tracking-wider text-[var(--color-muted)] uppercase">
@@ -80,9 +83,16 @@ export default async function EndlaufAdminIndexPage({
                 {e.factor !== 1 && (
                   <span className="text-xs text-[var(--color-accent)]">{formatFactor(e.factor)}</span>
                 )}
-                <span className="text-xs text-[var(--color-muted)]">
-                  {finalized[i].size} Klassen abgeschlossen
-                  {e.status === "live" && e.liveAgeClass ? ` · aktiv: ${ageClassName(e.liveAgeClass)}` : ""}
+                <span
+                  className={cn(
+                    "text-xs",
+                    scored[i].size === ENDLAUF26_AGE_CLASSES.length
+                      ? "text-[var(--color-rank-green)]"
+                      : "text-[var(--color-muted)]",
+                  )}
+                >
+                  {scored[i].size}/{ENDLAUF26_AGE_CLASSES.length} Ergebnislisten
+                  {e.status === "live" && e.liveAgeClass ? ` · live: ${ageClassName(e.liveAgeClass)}` : ""}
                 </span>
               </div>
               <div className="flex items-center gap-2 text-xs">
@@ -95,6 +105,14 @@ export default async function EndlaufAdminIndexPage({
       </section>
 
       <FieldAdmin championship={championship} drivers={fieldDrivers} />
+
+      <DocumentsAdmin
+        championshipSlug={slug}
+        slots={ENDLAUF26_DOCUMENT_SLOTS[championship]}
+        documents={documents}
+      />
+
+      <EndlaufRecomputeButton championshipSlug={slug} />
     </div>
   );
 }

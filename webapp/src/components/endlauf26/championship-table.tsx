@@ -156,9 +156,9 @@ export function EndlaufChampionshipTable({
                     {r.nominated && (
                       <span
                         className="ml-2 rounded-sm bg-[var(--color-accent)]/15 px-1 py-0.5 text-[10px] font-semibold text-[var(--color-accent)] uppercase"
-                        title="Nachnominiert — rückt für einen abgemeldeten Fahrer nach"
+                        title="Nachrücker — war in der Liste nicht grün markiert, startet aber bei den Endläufen"
                       >
-                        nachnominiert
+                        Nachrücker
                       </span>
                     )}
                   </td>

@@ -1,14 +1,26 @@
 "use client";
 
+/**
+ * Admin page of one Endlauf.
+ *
+ * Top: OFFICIAL RESULTS per age class — photograph the printed result list,
+ * review, import; stored photos; delete/replace. This is the only source of
+ * the championship standings. No live state needed.
+ *
+ * Bottom (collapsed): LIVE TIMING — a tool to follow selected drivers while
+ * the event runs. Its times never reach the championship.
+ */
+
 import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { useCallback, useEffect, useMemo, useRef, useState, useTransition } from "react";
 import {
+  AlertTriangle,
+  Camera,
   Check,
   ChevronRight,
   Eye,
-  Lock,
-  LockOpen,
+  ImageIcon,
   Mic,
   RefreshCw,
   Square,
@@ -21,9 +33,14 @@ import { parseDictation } from "@/lib/endlauf26/dictation";
 import { formatFactor, formatSeconds } from "@/lib/endlauf26/format";
 import { HOME_TEAM, HOME_TEAM_BG } from "@/lib/endlauf26/home-team";
 import type { EndlaufEntryRuns, EndlaufRunValue } from "@/lib/endlauf26/ranking";
-import { bestRunTotal } from "@/lib/endlauf26/ranking";
-import { cn } from "@/lib/utils";
-import { ResultsSheetImport } from "@/components/results-sheet-import.client";
+import { liveTotal } from "@/lib/endlauf26/ranking";
+import type {
+  EndlaufResultImageMeta,
+  EndlaufResultRow,
+  PoolDriver,
+} from "@/lib/endlauf26/results-types";
+import { cn, formatDateDe } from "@/lib/utils";
+import { EndlaufResultsImport } from "@/components/endlauf26/results-import.client";
 
 /* ────────────────────────────── types ────────────────────────────── */
 
@@ -34,18 +51,20 @@ export interface AdminEntry {
   teamName: string;
   startingOrder: number | null;
   runs: EndlaufEntryRuns;
-  positionRun1: number | null;
-  positionRun2: number | null;
   positionLive: number | null;
-  finishPosition: number | null;
-  pointsAwarded: number;
 }
 
 export interface AdminGroup {
   ageClass: number;
   name: string;
-  isFinalized: boolean;
+  /** Live-timing entries (the field). */
   entries: AdminEntry[];
+  /** Imported official results, sorted by position. */
+  results: EndlaufResultRow[];
+  /** Stored photos of the result list. */
+  images: EndlaufResultImageMeta[];
+  /** Every driver of the class (field + Nachrücker pool) for the OCR review. */
+  pool: PoolDriver[];
 }
 
 interface AdminEvent {
@@ -68,15 +87,12 @@ const RUN_LABEL: Record<RunType, string> = {
 
 const ERROR_TEXT: Record<string, string> = {
   unauthorized: "Nicht als Admin freigeschaltet — Seite neu laden und Admin-Token eingeben.",
-  age_class_finalized: "Klasse ist bereits abgeschlossen.",
   event_not_live: "Der Endlauf ist nicht live.",
   age_class_not_active: "Diese Klasse ist nicht aktiv.",
   driver_not_active: "Fahrer ist nicht aktiviert.",
   no_live_age_class: "Zuerst eine Klasse aktivieren.",
   entry_not_in_live_class: "Fahrer gehört nicht zur aktiven Klasse.",
-  age_class_still_live: "Klasse ist noch aktiv — zuerst deaktivieren.",
-  already_finalized: "Klasse ist bereits abgeschlossen.",
-  no_times: "Keine Zeiten vorhanden.",
+  confirmation_mismatch: "Bestätigung stimmt nicht.",
   missing_api_key: "OPENAI_API_KEY fehlt — Diktat nicht verfügbar.",
   no_speech: "Keine Sprache erkannt — bitte näher ans Mikrofon und erneut diktieren.",
   upstream_error: "Transkription fehlgeschlagen (OpenAI).",
@@ -102,35 +118,6 @@ function nextEmptyRun(runs: EndlaufEntryRuns): RunType {
   return "second";
 }
 
-/** Photo → OCR → bulk import of all times of one class (only while live, not finalized). */
-function SheetImport({
-  event,
-  group,
-  onChange,
-}: {
-  event: AdminEvent;
-  group: AdminGroup;
-  onChange: () => void;
-}) {
-  return (
-    <ResultsSheetImport
-      ocrEndpoint={`/api/endlauf26/events/${event.id}/ocr-results`}
-      importEndpoint={`/api/endlauf26/events/${event.id}/import-runs`}
-      classPayload={{ ageClass: group.ageClass }}
-      classLabel={group.name}
-      entries={group.entries.map((e) => ({
-        entryId: e.entryId,
-        firstName: e.firstName,
-        lastName: e.lastName,
-        teamName: e.teamName,
-        startingOrder: e.startingOrder,
-        runs: e.runs,
-      }))}
-      onImported={onChange}
-    />
-  );
-}
-
 function countRuns(entries: AdminEntry[]): number {
   return entries.reduce(
     (n, e) => n + [e.runs.test, e.runs.first, e.runs.second].filter((r) => r?.timeSeconds != null).length,
@@ -138,7 +125,580 @@ function countRuns(entries: AdminEntry[]): number {
   );
 }
 
-/** "Alle Zeiten löschen" for one class (live + not finalized only). */
+/* ────────────────────────────── root ────────────────────────────── */
+
+export function AdminEndlaufClient({
+  basePath,
+  championshipSlug,
+  event,
+  groups,
+}: {
+  basePath: string;
+  championshipSlug: string;
+  event: AdminEvent;
+  groups: AdminGroup[];
+}) {
+  const router = useRouter();
+  const [pending, startTransition] = useTransition();
+  const refresh = useCallback(() => startTransition(() => router.refresh()), [router]);
+  const [flash, setFlash] = useState<string | null>(null);
+  const showError = useCallback((msg: string) => {
+    setFlash(msg);
+    setTimeout(() => setFlash(null), 5000);
+  }, []);
+
+  const scoredCount = groups.filter((g) => g.results.length > 0).length;
+
+  return (
+    <div className="space-y-6">
+      <header className="flex flex-wrap items-start justify-between gap-3">
+        <div>
+          <div className="text-xs font-semibold tracking-wider text-[var(--color-accent)] uppercase">
+            Endläufe 2026 · Admin
+          </div>
+          <h1 className="text-2xl font-semibold">
+            Endlauf {event.number}: {event.name}
+            {event.factor !== 1 && (
+              <span className="ml-2 text-base font-normal text-[var(--color-accent)]">
+                {formatFactor(event.factor)}
+              </span>
+            )}
+          </h1>
+          <p className="mt-1 text-sm text-[var(--color-muted)]">
+            {scoredCount} von {groups.length} Klassen mit offizieller Ergebnisliste.
+          </p>
+        </div>
+        <div className="flex flex-wrap items-center gap-2">
+          {event.status === "live" && (
+            <Link
+              href={`${basePath}/live`}
+              className="inline-flex items-center gap-1.5 rounded-md border border-[var(--color-live)]/40 bg-[var(--color-live)]/10 px-3 py-1.5 text-sm text-[var(--color-live)] hover:bg-[var(--color-live)]/15"
+            >
+              <Zap className="h-4 w-4 animate-pulse" />
+              Live-Ansicht
+            </Link>
+          )}
+          <Link
+            href={`${basePath}/events/${event.slug}`}
+            className="inline-flex items-center gap-1.5 rounded-md border border-[var(--color-border)] bg-[var(--color-surface)] px-3 py-1.5 text-sm hover:bg-[var(--color-surface-2)]"
+          >
+            <Eye className="h-4 w-4" />
+            Ergebnisse
+          </Link>
+          <Link
+            href={`${basePath}/admin`}
+            className="inline-flex items-center gap-1.5 rounded-md border border-[var(--color-border)] bg-[var(--color-surface)] px-3 py-1.5 text-sm hover:bg-[var(--color-surface-2)]"
+          >
+            Alle Endläufe
+          </Link>
+          <Link
+            href={`${basePath}/admin#fahrerfeld`}
+            title="Abmeldungen und Nachrücker (gelten für alle Endläufe)"
+            className="inline-flex items-center gap-1.5 rounded-md border border-[var(--color-border)] bg-[var(--color-surface)] px-3 py-1.5 text-sm hover:bg-[var(--color-surface-2)]"
+          >
+            <Users className="h-4 w-4" />
+            Fahrerfeld
+          </Link>
+          <button
+            onClick={refresh}
+            className="inline-flex items-center gap-1.5 rounded-md border border-[var(--color-border)] bg-[var(--color-surface)] px-3 py-1.5 text-sm hover:bg-[var(--color-surface-2)]"
+          >
+            <RefreshCw className={cn("h-4 w-4", pending && "animate-spin")} />
+            Neu laden
+          </button>
+        </div>
+      </header>
+
+      {flash && (
+        <div className="rounded-md border border-red-500/40 bg-red-500/10 px-3 py-2 text-sm text-red-300">
+          {flash}
+        </div>
+      )}
+
+      <section className="space-y-3">
+        <div>
+          <h2 className="text-sm font-semibold tracking-wider text-[var(--color-muted)] uppercase">
+            Offizielle Ergebnislisten
+          </h2>
+          <p className="mt-1 text-xs text-[var(--color-muted)]">
+            Pro Klasse die ausgehängte Ergebnisliste fotografieren und einlesen. Die Liste ist die
+            einzige Grundlage der Endlaufwertung — Platz und Werte werden übernommen, wie gedruckt;
+            Unstimmigkeiten werden nur markiert. Eine Liste kann jederzeit gelöscht und neu
+            eingelesen werden; die Wertung folgt sofort.
+          </p>
+        </div>
+        {groups.map((g) => (
+          <ResultsClassCard
+            key={g.ageClass}
+            event={event}
+            championshipSlug={championshipSlug}
+            group={g}
+            onChange={refresh}
+            onError={showError}
+          />
+        ))}
+        {groups.length === 0 && (
+          <p className="text-sm text-[var(--color-muted)]">
+            Für diese Meisterschaft sind keine Fahrer eingetragen. <code>make seed-endlauf26</code>{" "}
+            ausführen.
+          </p>
+        )}
+      </section>
+
+      <LiveToolSection event={event} groups={groups} onChange={refresh} onError={showError} />
+
+      <ResetEventCard event={event} onChange={refresh} onError={showError} />
+    </div>
+  );
+}
+
+/* ─────────────────────────── official results ─────────────────────────── */
+
+function ResultsClassCard({
+  event,
+  championshipSlug,
+  group,
+  onChange,
+  onError,
+}: {
+  event: AdminEvent;
+  championshipSlug: string;
+  group: AdminGroup;
+  onChange: () => void;
+  onError: (m: string) => void;
+}) {
+  const hasResults = group.results.length > 0;
+  const [open, setOpen] = useState(false);
+  const [importing, setImporting] = useState(false);
+  const [busy, setBusy] = useState(false);
+
+  const warningCount = group.results.reduce((n, r) => n + r.warnings.length, 0);
+  const nachruecker = group.results.filter((r) => !r.qualified).length;
+
+  const deleteAll = async () => {
+    if (
+      !confirm(
+        `Ergebnisliste der ${group.name} löschen?\n\n${group.results.length} Zeilen und ${group.images.length} Foto(s) werden entfernt. Die Klasse zählt dann nicht mehr in der Wertung, bis eine neue Liste eingelesen wird.`,
+      )
+    )
+      return;
+    setBusy(true);
+    try {
+      const r = await apiCall(`/api/endlauf26/events/${event.id}/results`, {
+        method: "DELETE",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ ageClass: group.ageClass }),
+      });
+      if (!r.ok) onError(r.error);
+      onChange();
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  const deleteImage = async (img: EndlaufResultImageMeta) => {
+    if (!confirm("Dieses Foto löschen? Die daraus gelesenen Ergebniszeilen bleiben erhalten.")) return;
+    setBusy(true);
+    try {
+      const r = await apiCall(`/api/endlauf26/result-images/${img.id}`, { method: "DELETE" });
+      if (!r.ok) onError(r.error);
+      onChange();
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  return (
+    <div
+      className={cn(
+        "rounded-lg border bg-[var(--color-surface)]",
+        hasResults ? "border-[var(--color-rank-green)]/40" : "border-[var(--color-border)]",
+      )}
+    >
+      <div className="flex flex-wrap items-center justify-between gap-2 px-4 py-2">
+        <button
+          type="button"
+          onClick={() => setOpen((v) => !v)}
+          className="flex flex-wrap items-center gap-2 text-left"
+        >
+          <ChevronRight
+            className={cn("h-4 w-4 text-[var(--color-muted)] transition-transform", open && "rotate-90")}
+          />
+          <span className="text-sm font-semibold tracking-wider text-[var(--color-muted)] uppercase">
+            {group.name}
+          </span>
+          {hasResults ? (
+            <span className="inline-flex items-center gap-1 rounded-md bg-[var(--color-rank-green)]/20 px-2 py-0.5 text-xs font-semibold text-[var(--color-rank-green)]">
+              <Check className="h-3 w-3" /> {group.results.length} Fahrer gewertet
+            </span>
+          ) : (
+            <span className="rounded-md border border-dashed border-[var(--color-border)] px-2 py-0.5 text-xs text-[var(--color-muted)]">
+              keine Liste
+            </span>
+          )}
+          {nachruecker > 0 && (
+            <span className="rounded-sm bg-[var(--color-accent)]/15 px-1.5 py-0.5 text-[10px] font-semibold text-[var(--color-accent)] uppercase">
+              {nachruecker} Nachrücker
+            </span>
+          )}
+          {warningCount > 0 && (
+            <span className="inline-flex items-center gap-1 text-xs text-[var(--color-pending)]">
+              <AlertTriangle className="h-3 w-3" /> {warningCount} Hinweise
+            </span>
+          )}
+          {group.images.length > 0 && (
+            <span className="inline-flex items-center gap-1 text-xs text-[var(--color-muted)]">
+              <ImageIcon className="h-3 w-3" /> {group.images.length} Foto
+              {group.images.length === 1 ? "" : "s"}
+            </span>
+          )}
+        </button>
+        <div className="flex items-center gap-2">
+          {hasResults && (
+            <button
+              type="button"
+              onClick={deleteAll}
+              disabled={busy}
+              className={cn(
+                "inline-flex items-center gap-1 rounded-md border border-red-500/40 px-2.5 py-1 text-xs text-red-400 hover:bg-red-500/10",
+                busy && "opacity-50",
+              )}
+            >
+              <Trash2 className="h-3.5 w-3.5" /> Liste löschen
+            </button>
+          )}
+          <button
+            type="button"
+            onClick={() => {
+              setImporting((v) => !v);
+              setOpen(true);
+            }}
+            className={cn(
+              "inline-flex items-center gap-1 rounded-md px-2.5 py-1 text-xs font-medium",
+              importing
+                ? "border border-[var(--color-border)] text-[var(--color-muted)]"
+                : "bg-[var(--color-accent)] text-white hover:opacity-90",
+            )}
+          >
+            <Camera className="h-3.5 w-3.5" />
+            {importing ? "Einlesen schließen" : hasResults ? "Liste erneut einlesen" : "Liste einlesen"}
+          </button>
+        </div>
+      </div>
+
+      {open && (
+        <div className="space-y-3 border-t border-[var(--color-border)] p-3">
+          {importing && (
+            <EndlaufResultsImport
+              eventId={event.id}
+              championshipSlug={championshipSlug}
+              ageClass={group.ageClass}
+              classLabel={group.name}
+              pool={group.pool}
+              existing={group.results}
+              onImported={() => {
+                setImporting(false);
+                onChange();
+              }}
+            />
+          )}
+
+          {group.images.length > 0 && (
+            <div className="flex flex-wrap gap-2">
+              {group.images.map((img) => (
+                <div
+                  key={img.id}
+                  className="relative overflow-hidden rounded-md border border-[var(--color-border)]"
+                >
+                  <a
+                    href={`/api/endlauf26/result-images/${img.id}`}
+                    target="_blank"
+                    rel="noopener"
+                    title={`Foto öffnen · ${formatDateDe(img.uploadedAt)} · ${img.rowCount} Zeilen`}
+                  >
+                    {/* eslint-disable-next-line @next/next/no-img-element */}
+                    <img
+                      src={`/api/endlauf26/result-images/${img.id}`}
+                      alt={`Ergebnisliste ${group.name}`}
+                      className="h-28 w-auto object-cover"
+                    />
+                  </a>
+                  <button
+                    type="button"
+                    onClick={() => deleteImage(img)}
+                    disabled={busy}
+                    title="Foto löschen"
+                    className="absolute top-1 right-1 rounded-md bg-black/60 p-1 text-white hover:bg-red-600"
+                  >
+                    <Trash2 className="h-3 w-3" />
+                  </button>
+                </div>
+              ))}
+            </div>
+          )}
+
+          {hasResults ? (
+            <ResultsTable rows={group.results} />
+          ) : (
+            !importing && (
+              <p className="text-xs text-[var(--color-muted)]">
+                Noch keine Ergebnisliste für diese Klasse. „Liste einlesen“ startet die Foto-Erkennung.
+              </p>
+            )
+          )}
+        </div>
+      )}
+    </div>
+  );
+}
+
+function ResultsTable({ rows }: { rows: EndlaufResultRow[] }) {
+  return (
+    <div className="overflow-x-auto">
+      <table className="w-full text-sm">
+        <thead className="text-xs tracking-wide text-[var(--color-muted)] uppercase">
+          <tr className="border-b border-[var(--color-border)]">
+            <th className="px-2 py-2 text-right">Pl.</th>
+            <th className="px-2 py-2 text-right">Start</th>
+            <th className="px-3 py-2 text-left">Fahrer</th>
+            <th className="px-3 py-2 text-left">Verein</th>
+            <th className="px-2 py-2 text-center">W</th>
+            <th className="px-2 py-2 text-right">Training</th>
+            <th className="px-2 py-2 text-right">Lauf 1</th>
+            <th className="px-2 py-2 text-right">Lauf 2</th>
+            <th className="px-2 py-2 text-right">Fehler</th>
+            <th className="px-2 py-2 text-right">Gesamt</th>
+            <th className="px-2 py-2 text-right">Pkt.</th>
+            <th className="px-2 py-2 text-left">Hinweise</th>
+          </tr>
+        </thead>
+        <tbody>
+          {rows.map((r) => (
+            <tr
+              key={r.id}
+              className="border-b border-[var(--color-border)]/50 align-top last:border-0"
+              style={r.teamName === HOME_TEAM ? { backgroundColor: HOME_TEAM_BG } : undefined}
+            >
+              <td className="px-2 py-1.5 text-right font-semibold tabular-nums">{r.position ?? "—"}</td>
+              <td className="px-2 py-1.5 text-right tabular-nums text-[var(--color-muted)]">
+                {r.startPosition ?? "—"}
+              </td>
+              <td className="px-3 py-1.5 font-medium">
+                {r.lastName} {r.firstName}
+                {!r.qualified && (
+                  <span className="ml-2 rounded-sm bg-[var(--color-accent)]/15 px-1 py-0.5 text-[10px] font-semibold text-[var(--color-accent)] uppercase">
+                    Nachrücker
+                  </span>
+                )}
+                {r.sheetAdacId && (
+                  <span className="ml-2 text-xs text-[var(--color-muted)]">#{r.sheetAdacId}</span>
+                )}
+              </td>
+              <td className="px-3 py-1.5 text-[var(--color-muted)]">
+                {r.sheetTeam ?? r.teamName}
+              </td>
+              <td className="px-2 py-1.5 text-center">{r.wertung ?? "—"}</td>
+              <td className="px-2 py-1.5 text-right tabular-nums text-[var(--color-muted)]">
+                {formatSeconds(r.testTime)}
+              </td>
+              <td className="px-2 py-1.5 text-right whitespace-nowrap tabular-nums">
+                {formatSeconds(r.run1Time)}
+                {r.run1Penalty > 0 && (
+                  <span className="ml-1 text-xs text-[var(--color-pending)]">+{r.run1Penalty}</span>
+                )}
+              </td>
+              <td className="px-2 py-1.5 text-right whitespace-nowrap tabular-nums">
+                {formatSeconds(r.run2Time)}
+                {r.run2Penalty > 0 && (
+                  <span className="ml-1 text-xs text-[var(--color-pending)]">+{r.run2Penalty}</span>
+                )}
+              </td>
+              <td className="px-2 py-1.5 text-right tabular-nums">{r.totalPenalty ?? "—"}</td>
+              <td className="px-2 py-1.5 text-right font-semibold tabular-nums">
+                {formatSeconds(r.totalTime)}
+              </td>
+              <td className="px-2 py-1.5 text-right tabular-nums">{r.points ?? "—"}</td>
+              <td className="px-2 py-1.5 text-xs text-[var(--color-pending)]">
+                {r.warnings.map((w, i) => (
+                  <div key={i} className="flex items-start gap-1">
+                    <AlertTriangle className="mt-0.5 h-3 w-3 shrink-0" />
+                    {w}
+                  </div>
+                ))}
+              </td>
+            </tr>
+          ))}
+        </tbody>
+      </table>
+    </div>
+  );
+}
+
+/* ─────────────────────────── reset ─────────────────────────── */
+
+function ResetEventCard({
+  event,
+  onChange,
+  onError,
+}: {
+  event: AdminEvent;
+  onChange: () => void;
+  onError: (m: string) => void;
+}) {
+  const [open, setOpen] = useState(false);
+  const [confirmText, setConfirmText] = useState("");
+  const [busy, setBusy] = useState(false);
+
+  const reset = async () => {
+    if (confirmText !== event.slug) return;
+    if (!confirm(`Endlauf ${event.number} „${event.name}“ wirklich komplett zurücksetzen?`)) return;
+    setBusy(true);
+    try {
+      const r = await apiCall(`/api/endlauf26/events/${event.id}/reset`, {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ confirm: confirmText }),
+      });
+      if (!r.ok) onError(r.error);
+      setOpen(false);
+      setConfirmText("");
+      onChange();
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  return (
+    <div className="rounded-lg border border-red-500/30 bg-[var(--color-surface)]">
+      <button
+        type="button"
+        onClick={() => setOpen((v) => !v)}
+        className="flex w-full items-center gap-2 px-4 py-2 text-left"
+      >
+        <ChevronRight
+          className={cn("h-4 w-4 text-[var(--color-muted)] transition-transform", open && "rotate-90")}
+        />
+        <span className="text-sm font-semibold tracking-wider text-red-400 uppercase">
+          Endlauf zurücksetzen
+        </span>
+        <span className="text-xs text-[var(--color-muted)]">
+          Alle Ergebnislisten, Fotos und Live-Zeiten dieses Endlaufs löschen
+        </span>
+      </button>
+      {open && (
+        <div className="space-y-2 border-t border-red-500/20 p-4 text-sm">
+          <p className="text-[var(--color-muted)]">
+            Löscht alle offiziellen Ergebnisse und Fotos, alle Live-Zeiten und den Live-Status dieses
+            Endlaufs. Fahrerfeld (Nachrücker, Abmeldungen) und Startreihenfolgen bleiben erhalten.
+            Zum Bestätigen <code className="rounded bg-[var(--color-surface-2)] px-1">{event.slug}</code>{" "}
+            eingeben.
+          </p>
+          <div className="flex flex-wrap items-center gap-2">
+            <input
+              type="text"
+              value={confirmText}
+              onChange={(ev) => setConfirmText(ev.target.value)}
+              placeholder={event.slug}
+              className="rounded-md border border-[var(--color-border)] bg-[var(--color-background)] px-2 py-1 text-sm"
+            />
+            <button
+              type="button"
+              onClick={reset}
+              disabled={busy || confirmText !== event.slug}
+              className={cn(
+                "inline-flex items-center gap-1 rounded-md bg-red-600 px-3 py-1.5 text-sm font-medium text-white",
+                (busy || confirmText !== event.slug) && "cursor-not-allowed opacity-50",
+              )}
+            >
+              <Trash2 className="h-4 w-4" /> Endlauf zurücksetzen
+            </button>
+          </div>
+        </div>
+      )}
+    </div>
+  );
+}
+
+/* ─────────────────────────── live tool ─────────────────────────── */
+
+function LiveToolSection({
+  event,
+  groups,
+  onChange,
+  onError,
+}: {
+  event: AdminEvent;
+  groups: AdminGroup[];
+  onChange: () => void;
+  onError: (m: string) => void;
+}) {
+  const [open, setOpen] = useState(event.status === "live");
+  const activeGroup = groups.find((g) => g.ageClass === event.liveAgeClass) ?? null;
+  const otherGroups = groups.filter((g) => g.ageClass !== event.liveAgeClass);
+  const totalRuns = groups.reduce((n, g) => n + countRuns(g.entries), 0);
+
+  return (
+    <section className="rounded-lg border border-[var(--color-border)] bg-[var(--color-surface)]">
+      <button
+        type="button"
+        onClick={() => setOpen((v) => !v)}
+        className="flex w-full flex-wrap items-center gap-2 px-4 py-2 text-left"
+      >
+        <ChevronRight
+          className={cn("h-4 w-4 text-[var(--color-muted)] transition-transform", open && "rotate-90")}
+        />
+        <Zap className="h-4 w-4 text-[var(--color-live)]" />
+        <span className="text-sm font-semibold tracking-wider text-[var(--color-muted)] uppercase">
+          Live-Timing (Werkzeug)
+        </span>
+        <span className="text-xs text-[var(--color-muted)]">
+          Zeiten mitschreiben, um während des Endlaufs ein Gefühl zu bekommen — fließt nie in die
+          Wertung ein.
+          {totalRuns > 0 && ` · ${totalRuns} Läufe erfasst`}
+        </span>
+        {event.status === "live" && (
+          <span className="inline-flex items-center gap-1 rounded-md bg-[var(--color-live)]/15 px-2 py-0.5 text-xs font-semibold text-[var(--color-live)]">
+            <Zap className="h-3 w-3 animate-pulse" /> LIVE
+          </span>
+        )}
+      </button>
+
+      {open && (
+        <div className="space-y-4 border-t border-[var(--color-border)] p-4">
+          <StatusControl event={event} onChange={onChange} onError={onError} />
+
+          {event.status === "live" ? (
+            <LiveClassControl event={event} groups={groups} onChange={onChange} onError={onError} />
+          ) : (
+            <p className="text-sm text-[var(--color-muted)]">
+              Zum Mitschreiben den Endlauf auf <strong>Live</strong> setzen, dann eine Klasse und den
+              aktuellen Fahrer aktivieren. Die offizielle Ergebnisliste wird davon unabhängig oben
+              eingelesen.
+            </p>
+          )}
+
+          {activeGroup && (
+            <ActiveClassEditor event={event} group={activeGroup} onChange={onChange} onError={onError} />
+          )}
+
+          <div className="space-y-3">
+            {otherGroups.map((g) => (
+              <CollapsedLiveClass
+                key={g.ageClass}
+                event={event}
+                group={g}
+                onChange={onChange}
+                onError={onError}
+              />
+            ))}
+          </div>
+        </div>
+      )}
+    </section>
+  );
+}
+
+/** "Alle Zeiten löschen" for one class. */
 function ClearClassButton({
   event,
   group,
@@ -152,12 +712,12 @@ function ClearClassButton({
 }) {
   const [busy, setBusy] = useState(false);
   const runCount = countRuns(group.entries);
-  if (event.status !== "live" || group.isFinalized || runCount === 0) return null;
+  if (runCount === 0) return null;
 
   const clearAll = async () => {
     if (
       !confirm(
-        `Wirklich ALLE Zeiten der ${group.name} löschen?\n\n${runCount} Läufe von ${group.entries.length} Fahrern werden entfernt (Training, Lauf 1, Lauf 2). Das kann nicht rückgängig gemacht werden.`,
+        `Wirklich ALLE Live-Zeiten der ${group.name} löschen?\n\n${runCount} Läufe von ${group.entries.length} Fahrern werden entfernt (Training, Lauf 1, Lauf 2). Die offizielle Ergebnisliste ist davon nicht betroffen.`,
       )
     )
       return;
@@ -204,7 +764,7 @@ function ClearDriverButton({
 
   const clear = async (ev: React.MouseEvent) => {
     ev.stopPropagation();
-    if (!confirm(`Alle Zeiten von ${entry.lastName} ${entry.firstName} löschen (Training, Lauf 1, Lauf 2)?`))
+    if (!confirm(`Alle Live-Zeiten von ${entry.lastName} ${entry.firstName} löschen (Training, Lauf 1, Lauf 2)?`))
       return;
     setBusy(true);
     try {
@@ -231,136 +791,6 @@ function ClearDriverButton({
   );
 }
 
-/* ────────────────────────────── root ────────────────────────────── */
-
-export function AdminEndlaufClient({
-  basePath,
-  event,
-  groups,
-}: {
-  basePath: string;
-  event: AdminEvent;
-  groups: AdminGroup[];
-}) {
-  const router = useRouter();
-  const [pending, startTransition] = useTransition();
-  const refresh = useCallback(() => startTransition(() => router.refresh()), [router]);
-  const [flash, setFlash] = useState<string | null>(null);
-  const showError = useCallback((msg: string) => {
-    setFlash(msg);
-    setTimeout(() => setFlash(null), 4000);
-  }, []);
-
-  const activeGroup = groups.find((g) => g.ageClass === event.liveAgeClass) ?? null;
-  const otherGroups = groups.filter((g) => g.ageClass !== event.liveAgeClass);
-
-  return (
-    <div className="space-y-6">
-      <header className="flex flex-wrap items-start justify-between gap-3">
-        <div>
-          <div className="text-xs font-semibold tracking-wider text-[var(--color-accent)] uppercase">
-            Endläufe 2026 · Admin
-          </div>
-          <h1 className="text-2xl font-semibold">
-            Endlauf {event.number}: {event.name}
-            {event.factor !== 1 && (
-              <span className="ml-2 text-base font-normal text-[var(--color-accent)]">
-                {formatFactor(event.factor)}
-              </span>
-            )}
-          </h1>
-        </div>
-        <div className="flex flex-wrap items-center gap-2">
-          {event.status === "live" && (
-            <Link
-              href={`${basePath}/live`}
-              className="inline-flex items-center gap-1.5 rounded-md border border-[var(--color-live)]/40 bg-[var(--color-live)]/10 px-3 py-1.5 text-sm text-[var(--color-live)] hover:bg-[var(--color-live)]/15"
-            >
-              <Zap className="h-4 w-4 animate-pulse" />
-              Live-Ansicht
-            </Link>
-          )}
-          <Link
-            href={`${basePath}/events/${event.slug}`}
-            className="inline-flex items-center gap-1.5 rounded-md border border-[var(--color-border)] bg-[var(--color-surface)] px-3 py-1.5 text-sm hover:bg-[var(--color-surface-2)]"
-          >
-            <Eye className="h-4 w-4" />
-            Ergebnisse
-          </Link>
-          <Link
-            href={`${basePath}/admin`}
-            className="inline-flex items-center gap-1.5 rounded-md border border-[var(--color-border)] bg-[var(--color-surface)] px-3 py-1.5 text-sm hover:bg-[var(--color-surface-2)]"
-          >
-            Alle Endläufe
-          </Link>
-          <Link
-            href={`${basePath}/admin#fahrerfeld`}
-            title="Abmeldungen und Nachnominierungen (gelten für alle Endläufe)"
-            className="inline-flex items-center gap-1.5 rounded-md border border-[var(--color-border)] bg-[var(--color-surface)] px-3 py-1.5 text-sm hover:bg-[var(--color-surface-2)]"
-          >
-            <Users className="h-4 w-4" />
-            Fahrerfeld
-          </Link>
-          <button
-            onClick={refresh}
-            className="inline-flex items-center gap-1.5 rounded-md border border-[var(--color-border)] bg-[var(--color-surface)] px-3 py-1.5 text-sm hover:bg-[var(--color-surface-2)]"
-          >
-            <RefreshCw className={cn("h-4 w-4", pending && "animate-spin")} />
-            Neu laden
-          </button>
-        </div>
-      </header>
-
-      {flash && (
-        <div className="rounded-md border border-red-500/40 bg-red-500/10 px-3 py-2 text-sm text-red-300">
-          {flash}
-        </div>
-      )}
-
-      <StatusControl event={event} onChange={refresh} onError={showError} />
-
-      {event.status === "live" && (
-        <LiveClassControl event={event} groups={groups} onChange={refresh} onError={showError} />
-      )}
-
-      {event.status !== "live" && (
-        <p className="text-sm text-[var(--color-muted)]">
-          Zum Erfassen von Zeiten den Endlauf auf <strong>Live</strong> setzen, dann eine Klasse
-          und den aktuellen Fahrer aktivieren. Reihenfolge je Klasse: Training Fahrer 1, Training
-          Fahrer 2, Lauf 1 Fahrer 1, Lauf 1 Fahrer 2, nächstes Paar … danach Lauf 2 für alle.
-        </p>
-      )}
-
-      {activeGroup && (
-        <ActiveClassEditor
-          event={event}
-          group={activeGroup}
-          onChange={refresh}
-          onError={showError}
-        />
-      )}
-
-      <div className="space-y-3">
-        {otherGroups.map((g) => (
-          <CollapsedClass
-            key={g.ageClass}
-            event={event}
-            group={g}
-            onChange={refresh}
-            onError={showError}
-          />
-        ))}
-        {groups.length === 0 && (
-          <p className="text-sm text-[var(--color-muted)]">
-            Für diesen Endlauf sind keine Fahrer eingetragen. <code>make seed-endlauf26</code>{" "}
-            ausführen.
-          </p>
-        )}
-      </div>
-    </div>
-  );
-}
-
 /* ───────────────────────────── status ───────────────────────────── */
 
 function StatusControl({
@@ -378,7 +808,7 @@ function StatusControl({
     if (
       next !== "live" &&
       event.status === "live" &&
-      !confirm("Endlauf beenden? Aktive Klasse und Fahrer werden zurückgesetzt.")
+      !confirm("Live-Modus beenden? Aktive Klasse und Fahrer werden zurückgesetzt.")
     )
       return;
     setBusy(next);
@@ -395,7 +825,7 @@ function StatusControl({
     }
   };
   return (
-    <div className="flex flex-wrap items-center gap-2 rounded-lg border border-[var(--color-border)] bg-[var(--color-surface)] p-3">
+    <div className="flex flex-wrap items-center gap-2 rounded-lg border border-[var(--color-border)] bg-[var(--color-background)] p-3">
       <span className="text-sm text-[var(--color-muted)]">Status:</span>
       {(["upcoming", "live", "completed"] as const).map((s) => (
         <button
@@ -417,6 +847,9 @@ function StatusControl({
           {s === "upcoming" ? "Geplant" : s === "live" ? "Live" : "Beendet"}
         </button>
       ))}
+      <span className="text-xs text-[var(--color-muted)]">
+        Steuert nur die Live-Ansicht — die Wertung hängt allein von den eingelesenen Listen ab.
+      </span>
     </div>
   );
 }
@@ -460,17 +893,16 @@ function LiveClassControl({
           <button
             key={g.ageClass}
             onClick={() => setClass(g.ageClass)}
-            disabled={busy || g.isFinalized}
+            disabled={busy}
             className={cn(
               "rounded-md px-3 py-1.5 text-sm",
               event.liveAgeClass === g.ageClass
                 ? "bg-[var(--color-live)] text-white"
                 : "border border-[var(--color-border)] text-[var(--color-muted)] hover:text-[var(--color-foreground)]",
-              (busy || g.isFinalized) && "opacity-50",
+              busy && "opacity-50",
             )}
           >
             {g.name}
-            {g.isFinalized && " ✓"}
           </button>
         ))}
         <button
@@ -485,9 +917,8 @@ function LiveClassControl({
         </button>
       </div>
       <p className="mt-2 text-xs text-[var(--color-muted)]">
-        Nur eine Klasse ist gleichzeitig aktiv. Nach dem letzten Lauf die Klasse deaktivieren
-        („Keine“ oder nächste Klasse) und dann abschließen — erst dann fließen die Punkte in die
-        Endlaufwertung.
+        Nur eine Klasse ist gleichzeitig aktiv. Reihenfolge je Klasse: Training Fahrer 1, Training
+        Fahrer 2, Lauf 1 Fahrer 1, Lauf 1 Fahrer 2, nächstes Paar … danach Lauf 2 für alle.
       </p>
     </div>
   );
@@ -567,7 +998,7 @@ function ActiveClassEditor({
         <div className="flex flex-wrap items-center justify-between gap-2 border-b border-[var(--color-border)] px-4 py-2">
           <div className="flex items-center gap-2">
             <h3 className="text-sm font-semibold tracking-wider text-[var(--color-muted)] uppercase">
-              {group.name} — Zeiten
+              {group.name} — Live-Zeiten
             </h3>
             <span className="inline-flex items-center gap-1 rounded-md bg-[var(--color-live)]/15 px-2 py-0.5 text-xs font-semibold text-[var(--color-live)]">
               <Zap className="h-3 w-3 animate-pulse" />
@@ -576,7 +1007,7 @@ function ActiveClassEditor({
           </div>
           <div className="flex items-center gap-3">
             <span className="text-xs text-[var(--color-muted)]">
-              Startreihenfolge von unten nach oben · Zeile anklicken = Fahrer aktivieren
+              Zeile anklicken = Fahrer aktivieren
             </span>
             <ClearClassButton event={event} group={group} onChange={onChange} onError={onError} />
           </div>
@@ -596,14 +1027,11 @@ function ActiveClassEditor({
               <tr className="border-b border-[var(--color-border)]">
                 <th className="px-2 py-2 text-left">Start</th>
                 <th className="px-3 py-2 text-left">Fahrer</th>
-                <th className="px-3 py-2 text-left">Verein</th>
                 <th className="px-2 py-2 text-right">Training</th>
                 <th className="px-2 py-2 text-right">Lauf 1</th>
-                <th className="px-2 py-2 text-right" title="Live-Position nach Lauf 1">Pos L1</th>
                 <th className="px-2 py-2 text-right">Lauf 2</th>
-                <th className="px-2 py-2 text-right" title="Live-Position nach Lauf 2">Pos L2</th>
-                <th className="px-2 py-2 text-right">Bester</th>
-                <th className="px-2 py-2 text-right" title="Live-Gesamtposition">Pos</th>
+                <th className="px-2 py-2 text-right" title="Lauf 1 + Lauf 2 inkl. Strafsekunden">Gesamt</th>
+                <th className="px-2 py-2 text-right" title="Live-Position">Pos</th>
                 <th className="px-2 py-2" />
               </tr>
             </thead>
@@ -630,10 +1058,9 @@ function ActiveClassEditor({
                     <td className="px-3 py-1.5 font-medium">
                       <span className="inline-flex items-center gap-1.5">
                         {isActive && <Zap className="h-3.5 w-3.5 animate-pulse text-[var(--color-live)]" />}
-                        {e.lastName} {e.firstName}
+                        {e.firstName} {e.lastName.charAt(0)}.
                       </span>
                     </td>
-                    <td className="px-3 py-1.5 text-[var(--color-muted)]">{e.teamName}</td>
                     <EditableRunCell
                       entry={e}
                       runType="test"
@@ -649,7 +1076,6 @@ function ActiveClassEditor({
                       onActivate={() => activate(e.entryId)}
                       onSave={saveRun}
                     />
-                    <td className="px-2 py-1.5 text-right tabular-nums">{e.positionRun1 ?? "—"}</td>
                     <EditableRunCell
                       entry={e}
                       runType="second"
@@ -657,9 +1083,8 @@ function ActiveClassEditor({
                       onActivate={() => activate(e.entryId)}
                       onSave={saveRun}
                     />
-                    <td className="px-2 py-1.5 text-right tabular-nums">{e.positionRun2 ?? "—"}</td>
                     <td className="px-2 py-1.5 text-right font-semibold tabular-nums">
-                      {formatSeconds(bestRunTotal(e.runs))}
+                      {formatSeconds(liveTotal(e.runs))}
                     </td>
                     <td className="px-2 py-1.5 text-right">
                       <span
@@ -682,8 +1107,6 @@ function ActiveClassEditor({
           </table>
         </div>
       </div>
-
-      {!group.isFinalized && <SheetImport event={event} group={group} onChange={onChange} />}
     </section>
   );
 }
@@ -1213,9 +1636,9 @@ function StartingOrderInput({ entry, onSaved }: { entry: AdminEntry; onSaved: ()
   );
 }
 
-/* ─────────────────────────── collapsed class ─────────────────────────── */
+/* ─────────────────────────── collapsed live class ─────────────────────────── */
 
-function CollapsedClass({
+function CollapsedLiveClass({
   event,
   group,
   onChange,
@@ -1227,13 +1650,7 @@ function CollapsedClass({
   onError: (m: string) => void;
 }) {
   const [open, setOpen] = useState(false);
-  const [busy, setBusy] = useState(false);
   const sorted = [...group.entries].sort((a, b) => {
-    if (group.isFinalized) {
-      const ap = a.finishPosition ?? Number.MAX_SAFE_INTEGER;
-      const bp = b.finishPosition ?? Number.MAX_SAFE_INTEGER;
-      if (ap !== bp) return ap - bp;
-    }
     const ao = a.startingOrder ?? Number.MAX_SAFE_INTEGER;
     const bo = b.startingOrder ?? Number.MAX_SAFE_INTEGER;
     if (ao !== bo) return ao - bo;
@@ -1243,45 +1660,8 @@ function CollapsedClass({
     (e) => e.runs.first?.timeSeconds != null || e.runs.second?.timeSeconds != null,
   ).length;
 
-  const finalize = async () => {
-    if (
-      !confirm(
-        `${group.name} abschließen?\n\nPlatz und Punkte werden aus den Zeiten berechnet (bester Lauf + Strafsek., Faktor ${formatFactor(event.factor)} in der Wertung) und die Klasse wird gesperrt. ${withTimes} von ${group.entries.length} Fahrern haben Zeiten.`,
-      )
-    )
-      return;
-    setBusy(true);
-    try {
-      const r = await apiCall(`/api/endlauf26/events/${event.id}/finalize-class`, {
-        method: "POST",
-        headers: { "content-type": "application/json" },
-        body: JSON.stringify({ ageClass: group.ageClass, force: withTimes === 0 }),
-      });
-      if (!r.ok) onError(r.error);
-      onChange();
-    } finally {
-      setBusy(false);
-    }
-  };
-
-  const reopen = async () => {
-    if (!confirm(`${group.name} wieder öffnen? Die Punkte fallen bis zum erneuten Abschluss aus der Wertung.`)) return;
-    setBusy(true);
-    try {
-      const r = await apiCall(`/api/endlauf26/events/${event.id}/finalize-class`, {
-        method: "DELETE",
-        headers: { "content-type": "application/json" },
-        body: JSON.stringify({ ageClass: group.ageClass }),
-      });
-      if (!r.ok) onError(r.error);
-      onChange();
-    } finally {
-      setBusy(false);
-    }
-  };
-
   return (
-    <div className="rounded-lg border border-[var(--color-border)] bg-[var(--color-surface)]">
+    <div className="rounded-lg border border-[var(--color-border)] bg-[var(--color-background)]">
       <div className="flex flex-wrap items-center justify-between gap-2 px-4 py-2">
         <button
           onClick={() => setOpen((v) => !v)}
@@ -1292,54 +1672,23 @@ function CollapsedClass({
             {group.name}
           </span>
           <span className="text-xs text-[var(--color-muted)]">
-            {group.entries.length} Fahrer · {withTimes} mit Zeiten
+            {group.entries.length} Fahrer · {withTimes} mit Live-Zeiten
           </span>
-          {group.isFinalized && (
-            <span className="inline-flex items-center gap-1 rounded-md bg-[var(--color-rank-green)]/20 px-2 py-0.5 text-xs font-semibold text-[var(--color-rank-green)]">
-              <Check className="h-3 w-3" /> Abgeschlossen
-            </span>
-          )}
         </button>
-        <div className="flex items-center gap-2">
-          <ClearClassButton event={event} group={group} onChange={onChange} onError={onError} />
-          {group.isFinalized ? (
-            <button
-              onClick={reopen}
-              disabled={busy}
-              title="Zeiten wieder editierbar machen, z. B. nach einer Korrektur durch die Rennleitung"
-              className="inline-flex items-center gap-1 rounded-md border border-[var(--color-border)] px-2.5 py-1 text-xs text-[var(--color-muted)] hover:text-[var(--color-foreground)]"
-            >
-              <LockOpen className="h-3.5 w-3.5" /> Wieder öffnen (Korrektur)
-            </button>
-          ) : (
-            <button
-              onClick={finalize}
-              disabled={busy || (event.status === "live" && event.liveAgeClass === group.ageClass)}
-              className={cn(
-                "inline-flex items-center gap-1 rounded-md border border-[var(--color-border)] bg-[var(--color-surface-2)] px-2.5 py-1 text-xs font-medium hover:bg-[var(--color-background)]",
-                busy && "opacity-50",
-              )}
-            >
-              <Lock className="h-3.5 w-3.5" /> Klasse abschließen → Wertung
-            </button>
-          )}
-        </div>
+        <ClearClassButton event={event} group={group} onChange={onChange} onError={onError} />
       </div>
       {open && (
         <div className="overflow-x-auto border-t border-[var(--color-border)]">
           <table className="w-full text-sm">
             <thead className="text-xs tracking-wide text-[var(--color-muted)] uppercase">
               <tr className="border-b border-[var(--color-border)]">
-                <th className="px-2 py-2 text-left">{group.isFinalized ? "Platz" : "Start"}</th>
+                <th className="px-2 py-2 text-left">Start</th>
                 <th className="px-3 py-2 text-left">Fahrer</th>
-                <th className="px-3 py-2 text-left">Verein</th>
                 <th className="px-2 py-2 text-right">Training</th>
                 <th className="px-2 py-2 text-right">Lauf 1</th>
-                <th className="px-2 py-2 text-right">Pos L1</th>
                 <th className="px-2 py-2 text-right">Lauf 2</th>
-                <th className="px-2 py-2 text-right">Pos L2</th>
-                <th className="px-2 py-2 text-right">Bester</th>
-                <th className="px-2 py-2 text-right">{group.isFinalized ? "Punkte" : "Pos"}</th>
+                <th className="px-2 py-2 text-right">Gesamt</th>
+                <th className="px-2 py-2 text-right">Pos</th>
               </tr>
             </thead>
             <tbody>
@@ -1349,33 +1698,23 @@ function CollapsedClass({
                   className="border-b border-[var(--color-border)]/50 last:border-0"
                   style={e.teamName === HOME_TEAM ? { backgroundColor: HOME_TEAM_BG } : undefined}
                 >
-                  <td className="px-2 py-1.5 tabular-nums">
-                    {group.isFinalized ? (e.finishPosition ?? "—") : (e.startingOrder ?? "—")}
+                  <td className="px-2 py-1.5" onClick={(ev) => ev.stopPropagation()}>
+                    <StartingOrderInput entry={e} onSaved={onChange} />
                   </td>
                   <td className="px-3 py-1.5 font-medium">
-                    {e.lastName} {e.firstName}
+                    {e.firstName} {e.lastName.charAt(0)}.
                   </td>
-                  <td className="px-3 py-1.5 text-[var(--color-muted)]">{e.teamName}</td>
                   <ReadRun run={e.runs.test} muted />
                   <ReadRun run={e.runs.first} />
-                  <td className="px-2 py-1.5 text-right tabular-nums">{e.positionRun1 ?? "—"}</td>
                   <ReadRun run={e.runs.second} />
-                  <td className="px-2 py-1.5 text-right tabular-nums">{e.positionRun2 ?? "—"}</td>
                   <td className="px-2 py-1.5 text-right font-semibold tabular-nums">
-                    {formatSeconds(bestRunTotal(e.runs))}
+                    {formatSeconds(liveTotal(e.runs))}
                   </td>
-                  <td className="px-2 py-1.5 text-right tabular-nums">
-                    {group.isFinalized ? e.pointsAwarded : (e.positionLive ?? "—")}
-                  </td>
+                  <td className="px-2 py-1.5 text-right tabular-nums">{e.positionLive ?? "—"}</td>
                 </tr>
               ))}
             </tbody>
           </table>
-          {event.status === "live" && !group.isFinalized && (
-            <div className="border-t border-[var(--color-border)] p-3">
-              <SheetImport event={event} group={group} onChange={onChange} />
-            </div>
-          )}
         </div>
       )}
     </div>

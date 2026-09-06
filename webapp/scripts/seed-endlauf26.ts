@@ -10,6 +10,9 @@
  * (plus admins' Nachnominierungen) form the Endlauf field and get entries;
  * the rest stays in the database as the pool of replacement candidates.
  * The admin flags `withdrawn` / `nominated` are never touched by the seed.
+ * Official results / photos (`endlauf26_results`, `endlauf26_result_images`)
+ * are never touched either. The source PDFs are stored as documents when the
+ * slot is still empty.
  *
  * Run:  cd webapp && npm run db:seed-endlauf26
  *       (or `make seed-endlauf26` from the project root)
@@ -22,6 +25,7 @@ import { drizzle } from "drizzle-orm/node-postgres";
 import { and, eq, or, sql } from "drizzle-orm";
 
 import * as schema from "../src/db/schema";
+import { ENDLAUF26_DOCUMENT_SLOTS } from "../src/lib/endlauf26/documents";
 import {
   computeEndlauf26Championship,
   type Endlauf26Championship,
@@ -337,6 +341,40 @@ async function seedEntries(championship: Endlauf26Championship) {
   console.log(`  ${championship}: ${inserted} new entries across ${events.length} events`);
 }
 
+/**
+ * Store the official source PDFs (data/endlauf26/source/*.pdf) as documents
+ * so they can be opened from the app. Only fills empty slots — a PDF an
+ * admin uploaded/replaced via the UI is never overwritten by the seed.
+ */
+async function seedDocuments() {
+  const sourceDir = join(DATA_DIR, "source");
+  for (const championship of Object.keys(ENDLAUF26_DOCUMENT_SLOTS) as Endlauf26Championship[]) {
+    for (const slot of ENDLAUF26_DOCUMENT_SLOTS[championship]) {
+      const file = join(sourceDir, slot.seedFile);
+      if (!existsSync(file)) {
+        console.log(`  ${championship}/${slot.key}: ${slot.seedFile} not found — skipped`);
+        continue;
+      }
+      const data = readFileSync(file);
+      const res = await db
+        .insert(schema.endlauf26Documents)
+        .values({
+          championship,
+          key: slot.key,
+          filename: slot.seedFile,
+          mime: "application/pdf",
+          size: data.byteLength,
+          data,
+        })
+        .onConflictDoNothing()
+        .returning({ id: schema.endlauf26Documents.id });
+      console.log(
+        `  ${championship}/${slot.key}: ${slot.seedFile} (${(data.byteLength / 1024).toFixed(0)} KB) ${res.length > 0 ? "stored" : "already present"}`,
+      );
+    }
+  }
+}
+
 /* ───────────────────────────── main ───────────────────────────── */
 
 async function seed() {
@@ -404,6 +442,9 @@ async function seed() {
   console.log("Seeding entries (starting order bottom-up)…");
   await seedEntries("hmj");
   await seedEntries("adac_hth");
+
+  console.log("Storing source PDFs…");
+  await seedDocuments();
 
   const [{ n }] = await db
     .select({ n: sql<number>`count(*)::int` })

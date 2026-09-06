@@ -2,9 +2,11 @@ import { notFound } from "next/navigation";
 import { AdminLogin } from "@/components/admin-login.client";
 import { isAdminSession } from "@/lib/admin-auth";
 import {
+  getClassPool,
   getEndlaufEntriesForEvent,
   getEndlaufEventBySlug,
-  getFinalizedClasses,
+  getEndlaufResults,
+  getResultImages,
 } from "@/lib/dal/endlauf26";
 import {
   ageClassName,
@@ -30,15 +32,16 @@ export default async function EndlaufAdminEventPage({
   const event = await getEndlaufEventBySlug(championship, slug);
   if (!event) notFound();
 
-  const [entries, finalized] = await Promise.all([
+  const [entries, results, images, pools] = await Promise.all([
     getEndlaufEntriesForEvent(event.id),
-    getFinalizedClasses(event.id),
+    getEndlaufResults(event.id),
+    getResultImages(event.id),
+    Promise.all(ENDLAUF26_AGE_CLASSES.map((c) => getClassPool(championship, c, event.id))),
   ]);
 
-  const groups: AdminGroup[] = ENDLAUF26_AGE_CLASSES.map((c) => ({
+  const groups: AdminGroup[] = ENDLAUF26_AGE_CLASSES.map((c, i) => ({
     ageClass: c,
     name: ageClassName(c),
-    isFinalized: finalized.has(c),
     entries: entries
       .filter((e) => e.ageClass === c)
       .map((e) => ({
@@ -48,17 +51,18 @@ export default async function EndlaufAdminEventPage({
         teamName: e.teamName,
         startingOrder: e.startingOrder,
         runs: e.runs,
-        positionRun1: e.positionRun1,
-        positionRun2: e.positionRun2,
         positionLive: e.positionLive,
-        finishPosition: e.finishPosition,
-        pointsAwarded: e.pointsAwarded,
       })),
-  })).filter((g) => g.entries.length > 0);
+    results: results.filter((r) => r.ageClass === c),
+    images: images.filter((im) => im.ageClass === c),
+    pool: pools[i],
+  })).filter((g) => g.pool.length > 0 || g.entries.length > 0 || g.results.length > 0);
 
+  const champSlug = ENDLAUF26_SLUGS[championship];
   return (
     <AdminEndlaufClient
-      basePath={`/endlauf26/${ENDLAUF26_SLUGS[championship]}`}
+      basePath={`/endlauf26/${champSlug}`}
+      championshipSlug={champSlug}
       event={{
         id: event.id,
         slug: event.slug,

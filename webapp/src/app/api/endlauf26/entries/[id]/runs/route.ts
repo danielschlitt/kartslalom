@@ -1,23 +1,19 @@
 import { NextRequest, NextResponse } from "next/server";
 import { isAdminSession, unauthorizedResponse } from "@/lib/admin-auth";
-import { and, eq } from "drizzle-orm";
+import { eq } from "drizzle-orm";
 import { db } from "@/db/drizzle";
-import {
-  endlauf26Entries,
-  endlauf26Events,
-  endlauf26Finalizations,
-} from "@/db/schema";
+import { endlauf26Entries, endlauf26Events } from "@/db/schema";
 import { recomputeLivePositions } from "@/lib/dal/endlauf26";
 
 type RunType = "test" | "first" | "second";
 const RUN_TYPES = new Set<RunType>(["test", "first", "second"]);
 
 /**
- * Save a run time / penalty for an entry.
+ * LIVE TIMING: save a run time / penalty for an entry.
  *
  * Guard rails: the event must be live, the entry's class must be the active
- * class, the entry must be the active driver, and the class must not be
- * finalized. Live positions are recomputed afterwards.
+ * class and the entry must be the active driver. Live positions are
+ * recomputed afterwards. Never touches the official results.
  */
 export async function POST(
   req: NextRequest,
@@ -66,20 +62,6 @@ export async function POST(
     .limit(1);
   if (!event) return NextResponse.json({ error: "not_found" }, { status: 404 });
 
-  const [fin] = await db
-    .select()
-    .from(endlauf26Finalizations)
-    .where(
-      and(
-        eq(endlauf26Finalizations.eventId, entry.eventId),
-        eq(endlauf26Finalizations.ageClass, entry.ageClass),
-      ),
-    )
-    .limit(1);
-  if (fin) {
-    return NextResponse.json({ error: "age_class_finalized" }, { status: 409 });
-  }
-
   if (event.status !== "live") {
     return NextResponse.json({ error: "event_not_live" }, { status: 409 });
   }
@@ -110,9 +92,9 @@ export async function POST(
 }
 
 /**
- * Clear all three runs of an entry (Training, Lauf 1, Lauf 2). Requires a
- * live event and a class that is not finalized; unlike POST it does not need
- * the entry to be the active driver. Live positions are recomputed.
+ * LIVE TIMING: clear all three runs of an entry (Training, Lauf 1, Lauf 2).
+ * Requires a live event; unlike POST it does not need the entry to be the
+ * active driver. Live positions are recomputed.
  */
 export async function DELETE(
   _req: NextRequest,
@@ -138,18 +120,6 @@ export async function DELETE(
     .where(eq(endlauf26Events.id, entry.eventId))
     .limit(1);
   if (!event) return NextResponse.json({ error: "not_found" }, { status: 404 });
-
-  const [fin] = await db
-    .select()
-    .from(endlauf26Finalizations)
-    .where(
-      and(
-        eq(endlauf26Finalizations.eventId, entry.eventId),
-        eq(endlauf26Finalizations.ageClass, entry.ageClass),
-      ),
-    )
-    .limit(1);
-  if (fin) return NextResponse.json({ error: "age_class_finalized" }, { status: 409 });
   if (event.status !== "live") {
     return NextResponse.json({ error: "event_not_live" }, { status: 409 });
   }

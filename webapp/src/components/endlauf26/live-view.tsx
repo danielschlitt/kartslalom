@@ -2,11 +2,7 @@ import Link from "next/link";
 import { Zap } from "lucide-react";
 import { AutoRefresh } from "@/components/auto-refresh";
 import { LiveBoard } from "@/components/endlauf26/live-board";
-import {
-  getEndlaufEntriesForEvent,
-  getFinalizedClasses,
-  type EndlaufEvent,
-} from "@/lib/dal/endlauf26";
+import { getEndlaufEntriesForEvent, type EndlaufEvent } from "@/lib/dal/endlauf26";
 import {
   ageClassName,
   ENDLAUF26_LABELS,
@@ -45,24 +41,20 @@ export async function LiveView({ event }: { event: EndlaufEvent }) {
     );
   }
 
-  const [entries, finalized] = await Promise.all([
-    getEndlaufEntriesForEvent(event.id, event.liveAgeClass),
-    getFinalizedClasses(event.id),
-  ]);
+  const entries = await getEndlaufEntriesForEvent(event.id, event.liveAgeClass);
 
   return (
     <div className="space-y-4">
       <LiveHeader event={event} ageClass={event.liveAgeClass} />
       <p className="text-xs text-[var(--color-muted)]">
-        Live-Zwischenstand nach Zeiten (bester Wertungslauf inkl. Strafsekunden). Pos L1 / Pos L2 =
-        Zwischenstand nach dem jeweiligen Lauf. Die Meisterschaftspunkte werden nach Abschluss der
-        Klasse vergeben.
+        Inoffizielles Live-Timing (Lauf 1 + Lauf 2 inkl. Strafsekunden, von Hand mitgeschrieben).
+        Maßgeblich ist allein die offizielle Ergebnisliste — sie wird nach dem Lauf eingelesen und
+        bestimmt Platz und Punkte.
       </p>
       <LiveBoard
         ageClassName={ageClassName(event.liveAgeClass)}
         entries={entries}
         liveEntryId={event.liveEntryId}
-        finalized={finalized.has(event.liveAgeClass)}
       />
       <AutoRefresh intervalMs={5000} />
     </div>

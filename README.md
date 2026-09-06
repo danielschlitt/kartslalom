@@ -45,7 +45,8 @@ Timing entry and event management lives under `/admin`:
 ### Result sheet OCR (photo → times)
 
 While an event is **live**, every non-finalized age class on `/admin/events/[id]`
-(and on the Endlauf admin) offers **"Ergebnisliste per Foto einlesen"**: take a
+offers **"Ergebnisliste per Foto einlesen"** (the Endlauf admin has its own,
+list-based variant — see below): take a
 photo of the posted result sheet of that class, the server sends it to an OpenAI
 vision model (`OPENAI_VISION_MODEL`, default `gpt-5.6`) with a strict JSON schema
 and maps the columns onto Training / Lauf 1 / Lauf 2 with time + Strafsekunden.
@@ -53,7 +54,7 @@ Rows are fuzzy-matched (name + Verein, one-to-one) against the entries of the
 class; confident matches are green, unsure ones are flagged, unmatched rows are
 excluded until a driver is picked from the searchable list. Times can be edited in
 the review table before **"Zeiten übernehmen"** bulk-saves them
-(`POST /api/admin/events/[id]/import-runs`, Endlauf: `/api/endlauf26/events/[id]/import-runs`).
+(`POST /api/admin/events/[id]/import-runs`).
 Photos are downscaled to 2048 px in the browser; empty cells are never written.
 
 ### Corrections and deleting times
@@ -64,9 +65,7 @@ re-read the sheet from a photo), then **"Aus Zeiten finalisieren"** again —
 positions and points are recomputed from the corrected times. While a class is
 open, the trash icon on a row deletes all runs of that driver
 (`DELETE /api/admin/entries/[id]/runs`) and **"Alle Zeiten löschen"** wipes the
-whole class (`DELETE /api/admin/events/[id]/runs`). The Endlauf admin has the same
-buttons (`DELETE /api/endlauf26/entries/[id]/runs`, `DELETE /api/endlauf26/events/[id]/runs`;
-live event required, live positions are recomputed).
+whole class (`DELETE /api/admin/events/[id]/runs`).
 
 ## Endläufe 2026 (hmj + ADAC Hessen-Thüringen)
 
@@ -86,15 +85,71 @@ to all Endläufe of the championship (announce them before the first Endlauf):
 - **Nachnominieren** — pick a non-qualified driver of the same class from the
   list; he is entered in every Endlauf, starts first in classes that have not
   begun yet (worst pre-Endlauf standing starts first) and scores like a
-  qualified driver (badge *nachnominiert*). Reversible while no time is stored.
+  qualified driver (badge *Nachrücker*). Reversible while no result is stored.
+  Usually not needed by hand: a driver who appears on an imported result list
+  without being green in the PDF becomes a Nachrücker automatically.
 
-A driver who is listed but simply does not set a time at an Endlauf needs no
-action: leave his times empty, finalize the class — he gets no position and 0
-points (ADAC: *n. g.* in the table).
+A driver who is listed but does not appear on the result list needs no action:
+he gets no position and 0 points for that Endlauf (ADAC: *n. g.* in the table).
 
-Deploying a schema change (e.g. the `qualified` / `withdrawn` / `nominated`
-columns) to an existing server database — the db targets run *inside* the
-`webapp` container, so the image has to be rebuilt first:
+### Official results: photo of the result list → championship
+
+The **only** source of Endlauf positions and points is the printed official
+result list of each age class. On `/endlauf26/[champ]/admin/events/[slug]` →
+**Offizielle Ergebnislisten**, every class has **"Liste einlesen"**: photograph
+the posted list (one class per photo; a two-page class is read as two photos —
+rows of other drivers are kept), the server reads the full hmj column set
+(Platz, Startplatz, Name, ADAC Ortsclub, Ausweis-Nr., Wertung D/M, Training,
+1./2. Lauf Zeit + Fehler, Gesamt Fehler, Gesamtzeit, ADAC Punkte — without the
+×1,25 factor) and proposes a driver from the whole class pool (field *and*
+replacement candidates; exact Ausweis-Nr. wins, then name + club). Every value
+is editable in the review table; plausibility checks run on every edit and only
+**flag** what does not add up (Gesamtzeit ≠ sum of runs + penalties, Gesamt
+Fehler ≠ sum, points ≠ points table for the place, a shorter Gesamtzeit placed
+behind a longer one, duplicate/missing places, unknown Ortsclub — acknowledge it
+or **"Verein anlegen"**). The printed order is never changed.
+**"Ergebnisse übernehmen"** stores the rows and the photo
+(`POST /api/endlauf26/events/[id]/results/ocr` → `…/results/import`), fills in
+missing Ausweis-Nr. / Wertung on the driver, turns non-green drivers into
+Nachrücker and re-activates withdrawn drivers who did start. No live state is
+required at any point; the championship table follows immediately.
+
+Corrections: **"Liste erneut einlesen"** replaces the rows of the drivers on the
+new photo, **"Liste löschen"** removes the class result (`DELETE …/results`),
+stored photos can be opened and deleted individually
+(`/api/endlauf26/result-images/[id]`). **"Endlauf zurücksetzen"** (bottom of
+the event admin, confirm with the event slug — `POST …/reset`) deletes all
+results, photos and live times of one Endlauf to start from scratch; field and
+start orders stay.
+
+Public event pages (`/endlauf26/[champ]/events/[slug]`) show the imported list
+per class plus alternative "what if" scorings — **Nur schnellste Runde**
+(fastest single run, no penalties), **Ohne Fehler** (Lauf 1 + Lauf 2, no
+penalties), **Nur Fehler** (by penalty seconds, tie → Gesamtzeit) — with a Diff
+column to the leader or, after clicking a row, to that driver. Rows link to the
+photo of the list.
+
+### Source PDFs
+
+The standings PDFs the field was derived from are stored in the database
+(`make seed-endlauf26` fills empty slots from `data/endlauf26/source/`; admins
+can replace them under **Quell-PDFs** on `/endlauf26/[champ]/admin`) and are
+linked on the championship page (`/api/endlauf26/documents/[id]`).
+
+### Live timing (tool only)
+
+Setting an Endlauf **Live**, activating a class/driver and dictating or typing
+times (collapsed **Live-Timing (Werkzeug)** section of the event admin,
+`/endlauf26/[champ]/live` for spectators) is a convenience to follow selected
+drivers during the event. The live board shows first name + initial, start
+position, live position and the three times with penalties; live positions
+rank by Lauf 1 + Lauf 2 incl. penalties. Live times never enter the
+championship.
+
+Deploying a schema change to an existing server database — the db targets run
+*inside* the `webapp` container, so the image has to be rebuilt first
+(`npm run db:push` first runs `scripts/pre-push.ts`, which drops objects removed
+from the schema so `drizzle-kit push` needs no interactive rename prompt):
 
 ```sh
 make deploy                      # rsync + rebuild + restart the containers

@@ -2,22 +2,16 @@ import { NextRequest, NextResponse } from "next/server";
 import { isAdminSession, unauthorizedResponse } from "@/lib/admin-auth";
 import { eq } from "drizzle-orm";
 import { db } from "@/db/drizzle";
-import { endlauf26Entries, endlauf26Finalizations } from "@/db/schema";
-import {
-  getEndlaufEvents,
-  recomputeLivePositions,
-  writeFinalResults,
-} from "@/lib/dal/endlauf26";
+import { endlauf26Entries } from "@/db/schema";
+import { getEndlaufEvents, recomputeLivePositions } from "@/lib/dal/endlauf26";
 import { championshipFromSlug, ENDLAUF26_AGE_CLASSES } from "@/lib/endlauf26/ranking";
 
 /**
- * "Streichliste neu berechnen" for the Endläufe.
+ * "Live-Positionen neu berechnen".
  *
- * For every finalized (event, class): re-derive finish positions + base
- * points from the stored times. For every non-finalized class with times:
- * recompute the live positions. Championship totals, Streichergebnisse and
- * movement arrows are always derived at read time, so they follow
- * automatically.
+ * Re-derives the stored live positions of every class with live times. The
+ * championship table itself needs no recomputation: it is computed at read
+ * time from the imported official result lists.
  */
 export async function POST(req: NextRequest) {
   if (!(await isAdminSession())) return unauthorizedResponse();
@@ -29,19 +23,10 @@ export async function POST(req: NextRequest) {
   }
 
   const events = await getEndlaufEvents(championship ?? undefined);
-  let finalizedClasses = 0;
   let liveClasses = 0;
   let entriesUpdated = 0;
 
   for (const ev of events) {
-    const fin = new Set(
-      (
-        await db
-          .select({ ageClass: endlauf26Finalizations.ageClass })
-          .from(endlauf26Finalizations)
-          .where(eq(endlauf26Finalizations.eventId, ev.id))
-      ).map((r) => r.ageClass),
-    );
     const classesWithEntries = new Set(
       (
         await db
@@ -52,20 +37,15 @@ export async function POST(req: NextRequest) {
     );
     for (const ageClass of ENDLAUF26_AGE_CLASSES) {
       if (!classesWithEntries.has(ageClass)) continue;
-      if (fin.has(ageClass)) {
-        entriesUpdated += await writeFinalResults(ev.id, ageClass);
-        finalizedClasses += 1;
-      } else {
-        const positions = await recomputeLivePositions(ev.id, ageClass);
-        if (positions.some((p) => p.started)) liveClasses += 1;
-      }
+      const positions = await recomputeLivePositions(ev.id, ageClass);
+      entriesUpdated += positions.length;
+      if (positions.some((p) => p.started)) liveClasses += 1;
     }
   }
 
   return NextResponse.json({
     ok: true,
     eventsTouched: events.length,
-    finalizedClasses,
     liveClasses,
     entriesUpdated,
   });

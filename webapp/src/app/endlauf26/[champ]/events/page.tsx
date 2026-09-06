@@ -2,9 +2,9 @@ import Link from "next/link";
 import { notFound } from "next/navigation";
 import { ChampHeader } from "@/components/endlauf26/champ-header";
 import { EventStatusBadge } from "@/components/endlauf26/event-status-badge";
-import { getEndlaufEvents, getFinalizedClasses } from "@/lib/dal/endlauf26";
+import { getEndlaufEvents, getScoredClasses } from "@/lib/dal/endlauf26";
 import { formatFactor } from "@/lib/endlauf26/format";
-import { championshipFromSlug, ENDLAUF26_SLUGS } from "@/lib/endlauf26/ranking";
+import { championshipFromSlug, ENDLAUF26_AGE_CLASSES, ENDLAUF26_SLUGS } from "@/lib/endlauf26/ranking";
 import { cn, formatDateDe } from "@/lib/utils";
 
 export const dynamic = "force-dynamic";
@@ -18,7 +18,7 @@ export default async function EndlaufEventsPage({
   const championship = championshipFromSlug(champ);
   if (!championship) notFound();
   const events = await getEndlaufEvents(championship);
-  const finalized = await Promise.all(events.map((e) => getFinalizedClasses(e.id)));
+  const scored = await Promise.all(events.map((e) => getScoredClasses(e.id)));
   const base = `/endlauf26/${ENDLAUF26_SLUGS[championship]}`;
 
   return (
@@ -53,7 +53,7 @@ export default async function EndlaufEventsPage({
                 </span>
               )}
               <span className="rounded-sm bg-[var(--color-surface-2)] px-1.5 py-0.5 text-[var(--color-muted)]">
-                {finalized[i].size} Klassen gewertet
+                {scored[i].size}/{ENDLAUF26_AGE_CLASSES.length} Klassen gewertet
               </span>
             </div>
           </Link>

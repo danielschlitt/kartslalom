@@ -2,11 +2,14 @@ import Link from "next/link";
 import { notFound } from "next/navigation";
 import { ChampHeader } from "@/components/endlauf26/champ-header";
 import { EndlaufChampionshipTable } from "@/components/endlauf26/championship-table";
+import { FileText } from "lucide-react";
 import {
+  getDocuments,
   getEndlaufChampionship,
   getLiveEndlaufEvent,
   toEventInfo,
 } from "@/lib/dal/endlauf26";
+import { ENDLAUF26_DOCUMENT_SLOTS } from "@/lib/endlauf26/documents";
 import {
   ageClassName,
   championshipFromSlug,
@@ -29,19 +32,21 @@ export default async function EndlaufChampionshipPage({
   if (!championship) notFound();
 
   const applyDrops = sp.drops !== "off";
-  const [data, liveEvent] = await Promise.all([
+  const [data, liveEvent, documents] = await Promise.all([
     getEndlaufChampionship(championship, { applyDrops }),
     getLiveEndlaufEvent(championship),
+    getDocuments(championship),
   ]);
+  const slotLabel = new Map(ENDLAUF26_DOCUMENT_SLOTS[championship].map((s) => [s.key, s.label]));
 
   const classes = [...new Set(data.rows.map((r) => r.ageClass))].sort((a, b) => a - b);
   const selected = sp.klasse ? Number(sp.klasse) : null;
   const visibleClasses = selected && classes.includes(selected) ? [selected] : classes;
   const base = `/endlauf26/${ENDLAUF26_SLUGS[championship]}`;
 
-  const finalizedCount = data.events.map((e) => ({
+  const scoredCount = data.events.map((e) => ({
     event: e,
-    classes: data.finalized.get(e.id)?.size ?? 0,
+    classes: data.scored.get(e.id)?.size ?? 0,
   }));
 
   return (
@@ -74,7 +79,7 @@ export default async function EndlaufChampionshipPage({
           )}
           <span>
             Endläufe gewertet:{" "}
-            {finalizedCount.map((f, i) => (
+            {scoredCount.map((f, i) => (
               <span key={f.event.id}>
                 {i > 0 && " · "}
                 {f.event.name} {f.classes}/{classes.length}
@@ -85,6 +90,25 @@ export default async function EndlaufChampionshipPage({
       </div>
 
       <Legend championship={championship} />
+
+      {documents.length > 0 && (
+        <p className="flex flex-wrap items-center gap-x-3 gap-y-1 text-xs text-[var(--color-muted)]">
+          <span>Grundlage (offizielle Listen, grün = qualifiziert):</span>
+          {documents.map((d) => (
+            <a
+              key={d.id}
+              href={`/api/endlauf26/documents/${d.id}`}
+              target="_blank"
+              rel="noopener"
+              className="inline-flex items-center gap-1 text-[var(--color-accent)] hover:underline"
+              title={d.filename}
+            >
+              <FileText className="h-3.5 w-3.5" />
+              {slotLabel.get(d.key) ?? d.filename} (PDF)
+            </a>
+          ))}
+        </p>
+      )}
 
       {visibleClasses.map((c) => (
         <EndlaufChampionshipTable
@@ -136,8 +160,8 @@ function Legend({ championship }: { championship: "hmj" | "adac_hth" }) {
           . Pfeile: Veränderung der Meisterschaftsposition durch den jeweiligen Endlauf.{" "}
           <span className="font-semibold text-[var(--color-live)]">abgemeldet</span> = tritt bei
           den Endläufen nicht an (nicht gewertet),{" "}
-          <span className="font-semibold text-[var(--color-accent)]">nachnominiert</span> = rückt
-          für einen abgemeldeten Fahrer nach.
+          <span className="font-semibold text-[var(--color-accent)]">Nachrücker</span> = war in
+          der Liste nicht grün markiert, startet aber bei den Endläufen.
         </>
       ) : (
         <>
@@ -148,8 +172,8 @@ function Legend({ championship }: { championship: "hmj" | "adac_hth" }) {
           der Meisterschaftsposition durch den jeweiligen Endlauf.{" "}
           <span className="font-semibold text-[var(--color-live)]">abgemeldet</span> = tritt bei
           den Endläufen nicht an (nicht gewertet),{" "}
-          <span className="font-semibold text-[var(--color-accent)]">nachnominiert</span> = rückt
-          für einen abgemeldeten Fahrer nach.
+          <span className="font-semibold text-[var(--color-accent)]">Nachrücker</span> = war in
+          der Liste nicht grün markiert, startet aber bei den Endläufen.
         </>
       )}
     </p>

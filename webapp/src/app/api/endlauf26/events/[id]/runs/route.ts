@@ -3,17 +3,13 @@ import { and, eq } from "drizzle-orm";
 import { isAdminSession, unauthorizedResponse } from "@/lib/admin-auth";
 import { db } from "@/db/drizzle";
 import { endlauf26Entries } from "@/db/schema";
-import {
-  getEndlaufEvent,
-  getFinalizedClasses,
-  recomputeLivePositions,
-} from "@/lib/dal/endlauf26";
+import { getEndlaufEvent, recomputeLivePositions } from "@/lib/dal/endlauf26";
 import { ENDLAUF26_AGE_CLASSES } from "@/lib/endlauf26/ranking";
 
 /**
- * Clear every run of every entry of one Endlauf class. Body: `{ ageClass }`.
- * Requires a live event and a class that is not finalized (re-open it first).
- * Live positions are recomputed afterwards.
+ * LIVE TIMING: clear every run of every entry of one class. Body: `{ ageClass }`.
+ * Requires a live event. Live positions are recomputed afterwards. Official
+ * results are not affected.
  */
 export async function DELETE(
   req: NextRequest,
@@ -33,10 +29,6 @@ export async function DELETE(
 
   const event = await getEndlaufEvent(eventId);
   if (!event) return NextResponse.json({ error: "not_found" }, { status: 404 });
-  const finalized = await getFinalizedClasses(eventId);
-  if (finalized.has(ageClass)) {
-    return NextResponse.json({ error: "age_class_finalized" }, { status: 409 });
-  }
   if (event.status !== "live") {
     return NextResponse.json({ error: "event_not_live" }, { status: 409 });
   }

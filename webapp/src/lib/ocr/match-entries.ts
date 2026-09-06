@@ -10,11 +10,16 @@
  */
 
 export interface MatchCandidate {
+  /** Identifier handed back in the match result (entry id or driver id — the caller decides). */
   entryId: number;
   firstName: string;
   lastName: string;
   teamName: string;
   startingOrder: number | null;
+  /** ADAC Ausweis-Nr. — an exact hit is a certain match. */
+  adacId?: string | null;
+  /** Short status shown next to the candidate in pickers (e.g. "Nachrücker"). */
+  tag?: string | null;
 }
 
 export interface MatchInput {
@@ -22,6 +27,7 @@ export interface MatchInput {
   firstName: string;
   team: string | null;
   startNumber: number | null;
+  adacId?: string | null;
 }
 
 export type MatchKind = "high" | "low" | "none";
@@ -133,7 +139,15 @@ export function teamSimilarity(ocrTeam: string | null, candTeam: string): number
   return sum / ct.length;
 }
 
+function normalizeId(s: string | null | undefined): string {
+  return (s ?? "").replace(/[^0-9a-z]/gi, "").toLowerCase();
+}
+
 export function scoreCandidate(row: MatchInput, cand: MatchCandidate): number {
+  // The Ausweis-Nr. identifies a driver uniquely — trust it over the name.
+  const rid = normalizeId(row.adacId);
+  const cid = normalizeId(cand.adacId);
+  if (rid !== "" && cid !== "" && rid === cid) return 1;
   const name = nameSimilarity(row.lastName, row.firstName, cand.lastName, cand.firstName);
   const hasTeam = row.team !== null && normalizeText(row.team) !== "";
   let score = hasTeam ? 0.75 * name + 0.25 * teamSimilarity(row.team, cand.teamName) : name;

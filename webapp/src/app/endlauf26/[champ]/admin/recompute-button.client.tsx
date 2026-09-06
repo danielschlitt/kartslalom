@@ -8,7 +8,6 @@ import { cn } from "@/lib/utils";
 interface RecomputeResponse {
   ok: boolean;
   eventsTouched: number;
-  finalizedClasses: number;
   liveClasses: number;
   entriesUpdated: number;
 }
@@ -23,7 +22,7 @@ export function EndlaufRecomputeButton({ championshipSlug }: { championshipSlug:
   const run = async () => {
     if (
       !confirm(
-        "Streichresultate, Plätze und Punkte der Endläufe neu berechnen?\n\nFür jede abgeschlossene Klasse werden Platz und Punkte aus den Zeiten (bester Lauf + Strafsek.) neu abgeleitet; für offene Klassen die Live-Positionen. Die Meisterschaftstabelle (Streichresultat, Faktoren, Pfeile) wird immer live aus diesen Werten berechnet.",
+        "Live-Positionen neu berechnen?\n\nNur das Live-Timing-Werkzeug ist betroffen. Die Endlaufwertung (Streichresultat, Faktoren, Pfeile) wird immer direkt aus den eingelesenen Ergebnislisten berechnet und braucht keine Neuberechnung.",
       )
     ) {
       return;
@@ -43,7 +42,7 @@ export function EndlaufRecomputeButton({ championshipSlug }: { championshipSlug:
       }
       const data: RecomputeResponse = await res.json();
       setMessage(
-        `Neu berechnet: ${data.entriesUpdated} Einträge in ${data.finalizedClasses} abgeschlossenen Klassen, ${data.liveClasses} offene Klassen mit Zeiten, ${data.eventsTouched} Endläufe.`,
+        `Neu berechnet: ${data.entriesUpdated} Live-Einträge, ${data.liveClasses} Klassen mit Zeiten, ${data.eventsTouched} Endläufe.`,
       );
       startTransition(() => router.refresh());
     } finally {
@@ -58,9 +57,9 @@ export function EndlaufRecomputeButton({ championshipSlug }: { championshipSlug:
       <div className="flex items-center gap-3">
         <Calculator className="h-4 w-4 text-[var(--color-muted)]" />
         <div>
-          <div className="text-sm font-semibold">Streichresultate neu berechnen</div>
+          <div className="text-sm font-semibold">Live-Positionen neu berechnen</div>
           <div className="text-xs text-[var(--color-muted)]">
-            Plätze, Punkte und Live-Positionen aller Endläufe aus den Zeiten ableiten.
+            Nur für das Live-Timing-Werkzeug — die Wertung folgt den eingelesenen Ergebnislisten automatisch.
           </div>
         </div>
       </div>

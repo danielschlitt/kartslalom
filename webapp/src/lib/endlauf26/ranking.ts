@@ -13,15 +13,20 @@
  *  adac_hth (ADAC Hessen-Thüringen)
  *   - regular-season standing counts as one race (position → points)
  *   - 3 Endläufe (Crumbach, Reinheim, Malsfeld ×1.1), no Streichergebnis
- *   - a driver who misses a (finalized) Endlauf is excluded from the ranking
+ *   - a driver who misses a (scored) Endlauf is excluded from the ranking
  *   - same tie-break chain as hmj
  *
  *  Field changes (both championships):
  *   - `withdrawn` drivers announced they will not compete. They keep their
  *     row (season points are still shown) but are excluded from the ranking
  *     in both championships — unranked, sorted to the bottom of the class.
- *   - `nominated` drivers were not qualified via the list but fill a vacated
- *     spot. They are scored exactly like qualified drivers.
+ *   - `nominated` drivers (Nachrücker) were not qualified via the list but
+ *     fill a vacated spot. They are scored exactly like qualified drivers.
+ *
+ *  Endlauf results come exclusively from the imported official result lists
+ *  (`endlauf26_results`): the printed position is the source of truth, the
+ *  printed "ADAC Punkte" are the base points. Live timing never feeds the
+ *  championship.
  */
 
 export type Endlauf26Championship = "hmj" | "adac_hth";
@@ -99,27 +104,38 @@ export interface EndlaufRankable {
 
 export interface EndlaufLivePositions {
   entryId: number;
-  /** Standing after Wertungslauf 1 (null without a time). */
+  /** Standing in Wertungslauf 1 (null without a time). */
   positionRun1: number | null;
-  /** Standing after Wertungslauf 2. */
+  /** Standing in Wertungslauf 2 alone. */
   positionRun2: number | null;
-  /** Overall standing: best of both runs incl. penalties. */
+  /**
+   * Overall standing: Lauf 1 + Lauf 2 incl. penalties (the official
+   * Kart-Slalom scoring). Drivers with fewer completed runs rank behind
+   * those with more, so the board reads like a provisional classification
+   * while Lauf 2 is still running.
+   */
   positionLive: number | null;
-  bestTotal: number | null;
+  /** Sum of the completed Wertungsläufe incl. penalties. */
+  liveTotal: number | null;
+  completedRuns: number;
   started: boolean;
 }
 
-function runTotal(r: EndlaufRunValue | null): number | null {
+export function runTotal(r: EndlaufRunValue | null): number | null {
   if (!r || r.timeSeconds === null) return null;
   return r.timeSeconds + r.penaltySeconds;
 }
 
-export function bestRunTotal(runs: EndlaufEntryRuns): number | null {
+/** Lauf 1 + Lauf 2 incl. penalties over the runs that exist (null without any). */
+export function liveTotal(runs: EndlaufEntryRuns): number | null {
   const a = runTotal(runs.first);
   const b = runTotal(runs.second);
-  if (a === null) return b;
-  if (b === null) return a;
-  return Math.min(a, b);
+  if (a === null && b === null) return null;
+  return (a ?? 0) + (b ?? 0);
+}
+
+export function completedRuns(runs: EndlaufEntryRuns): number {
+  return (runTotal(runs.first) === null ? 0 : 1) + (runTotal(runs.second) === null ? 0 : 1);
 }
 
 /** Shared positions for equal values; entries without value get null. */
@@ -141,6 +157,27 @@ function positionsFor(
   return out;
 }
 
+/** Overall live positions: more completed runs first, then lower total; ties share. */
+function livePositionsFor(
+  values: { entryId: number; completed: number; total: number | null }[],
+): Map<number, number | null> {
+  const out = new Map<number, number | null>();
+  const sorted = values
+    .filter((v) => v.total !== null)
+    .sort((a, b) => b.completed - a.completed || (a.total as number) - (b.total as number));
+  const same = (a: (typeof sorted)[number], b: (typeof sorted)[number]) =>
+    a.completed === b.completed && a.total === b.total;
+  let i = 0;
+  while (i < sorted.length) {
+    let j = i + 1;
+    while (j < sorted.length && same(sorted[j], sorted[i])) j += 1;
+    for (let k = i; k < j; k++) out.set(sorted[k].entryId, i + 1);
+    i = j;
+  }
+  for (const v of values) if (!out.has(v.entryId)) out.set(v.entryId, null);
+  return out;
+}
+
 /**
  * Compute the three live positions for every entry of one age class.
  * Times are compared including penalty seconds.
@@ -154,38 +191,25 @@ export function rankEndlaufEntries<T extends EndlaufRankable>(
   const p2 = positionsFor(
     entries.map((e) => ({ entryId: e.entryId, value: runTotal(e.runs.second) })),
   );
-  const pl = positionsFor(
-    entries.map((e) => ({ entryId: e.entryId, value: bestRunTotal(e.runs) })),
+  const pl = livePositionsFor(
+    entries.map((e) => ({
+      entryId: e.entryId,
+      completed: completedRuns(e.runs),
+      total: liveTotal(e.runs),
+    })),
   );
   return entries.map((e) => {
-    const best = bestRunTotal(e.runs);
+    const total = liveTotal(e.runs);
     return {
       entryId: e.entryId,
       positionRun1: p1.get(e.entryId) ?? null,
       positionRun2: p2.get(e.entryId) ?? null,
       positionLive: pl.get(e.entryId) ?? null,
-      bestTotal: best,
-      started: best !== null,
+      liveTotal: total,
+      completedRuns: completedRuns(e.runs),
+      started: total !== null,
     };
   });
-}
-
-export interface EndlaufFinalResult {
-  entryId: number;
-  finishPosition: number | null;
-  /** Base points from the scale (event factor is applied later). */
-  pointsAwarded: number;
-}
-
-/** Official result of an age class: live overall position → base points. */
-export function finalizeEndlaufClass<T extends EndlaufRankable>(
-  entries: readonly T[],
-): EndlaufFinalResult[] {
-  return rankEndlaufEntries(entries).map((p) => ({
-    entryId: p.entryId,
-    finishPosition: p.positionLive,
-    pointsAwarded: p.started ? pointsForPlace(p.positionLive) : 0,
-  }));
 }
 
 /* ─────────────────────────── championship ─────────────────────────── */
@@ -206,12 +230,17 @@ export interface SeasonResultInput {
 
 export interface EndlaufResultInput {
   eventId: number;
+  /** Official position as printed on the result list. */
   finishPosition: number | null;
-  /** Base points (scale), without factor. */
+  /** Base points (printed "ADAC Punkte", fallback: scale), without factor. */
   pointsAwarded: number;
+  /** The driver appears on the result list with a position. */
   started: boolean;
-  /** True when this driver's age class has been finalized for the event. */
-  finalized: boolean;
+  /**
+   * True when an official result list has been imported for this driver's
+   * age class at the event — only then does the Endlauf count at all.
+   */
+  scored: boolean;
 }
 
 export interface EndlaufDriverInput {
@@ -250,7 +279,7 @@ export interface ScoreCell {
   points: number;
   /** Streichergebnis */
   dropped: boolean;
-  /** Whether the result exists yet (season races always; Endläufe once finalized). */
+  /** Whether the result exists yet (season races always; Endläufe once the result list is imported). */
   available: boolean;
   started: boolean;
 }
@@ -282,7 +311,7 @@ export interface Endlauf26Row {
   totalPoints: number;
   rank: number | null;
   sharedRank: boolean;
-  /** Not classified: withdrawn (both) or missed a finalized Endlauf (adac_hth). */
+  /** Not classified: withdrawn (both) or missed a scored Endlauf (adac_hth). */
   excluded: boolean;
   startedEndlaeufe: number;
   /** countback[i] = number of counted results with position i+1 */
@@ -352,7 +381,7 @@ function buildCells(
     const r = byEvent.get(ev.eventId);
     const inScope =
       opts.upToEventNumber === undefined || ev.number <= opts.upToEventNumber;
-    const available = inScope && !!r?.finalized;
+    const available = inScope && !!r?.scored;
     const base = available ? r!.pointsAwarded : 0;
     cells.push({
       key: `e${ev.number}`,
@@ -464,7 +493,7 @@ function computeRowsForClass(
     );
     // Withdrawn drivers gave up their spot: unranked at the bottom in both
     // championships. ADAC additionally excludes anyone who misses a
-    // finalized Endlauf (all Endläufe are mandatory).
+    // scored Endlauf (all Endläufe are mandatory).
     const excluded =
       d.withdrawn ||
       (championship === "adac_hth" &&

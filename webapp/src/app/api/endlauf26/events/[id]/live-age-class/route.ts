@@ -1,11 +1,11 @@
 import { NextRequest, NextResponse } from "next/server";
 import { isAdminSession, unauthorizedResponse } from "@/lib/admin-auth";
-import { and, eq } from "drizzle-orm";
+import { eq } from "drizzle-orm";
 import { db } from "@/db/drizzle";
-import { endlauf26Events, endlauf26Finalizations } from "@/db/schema";
+import { endlauf26Events } from "@/db/schema";
 import { ENDLAUF26_AGE_CLASSES } from "@/lib/endlauf26/ranking";
 
-/** Activate (or clear) the age class currently on track. Clears the active driver. */
+/** LIVE TIMING: activate (or clear) the age class currently on track. Clears the active driver. */
 export async function PATCH(
   req: NextRequest,
   { params }: { params: Promise<{ id: string }> },
@@ -35,22 +35,6 @@ export async function PATCH(
   if (!event) return NextResponse.json({ error: "not_found" }, { status: 404 });
   if (event.status !== "live") {
     return NextResponse.json({ error: "event_not_live" }, { status: 400 });
-  }
-
-  if (ageClass !== null) {
-    const [fin] = await db
-      .select()
-      .from(endlauf26Finalizations)
-      .where(
-        and(
-          eq(endlauf26Finalizations.eventId, eventId),
-          eq(endlauf26Finalizations.ageClass, ageClass),
-        ),
-      )
-      .limit(1);
-    if (fin) {
-      return NextResponse.json({ error: "age_class_finalized" }, { status: 409 });
-    }
   }
 
   await db

@@ -358,7 +358,7 @@ function StatusBadge({ driver }: { driver: EndlaufFieldDriver }) {
   if (driver.nominated) {
     return (
       <span className="rounded-sm bg-[var(--color-accent)]/15 px-1.5 py-0.5 text-[10px] font-semibold text-[var(--color-accent)] uppercase">
-        nachnominiert
+        Nachrücker
       </span>
     );
   }
