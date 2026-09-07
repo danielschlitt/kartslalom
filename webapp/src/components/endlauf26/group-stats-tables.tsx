@@ -156,6 +156,81 @@ export function GroupPointsTable({
 }
 
 /**
+ * hmj only: points from the Endläufe alone (Langgöns 1 & 2, ×1,25) per
+ * driver — once with every Endlauf result, once with only the results that
+ * count (a struck Endlauf is excluded). Sorted by the counted average.
+ */
+export function GroupEndlaufPointsTable({
+  title,
+  rows,
+  highlightName,
+  countLabel,
+}: {
+  title: string;
+  rows: GroupStatRow[];
+  highlightName: string;
+  countLabel: string;
+}) {
+  const sorted = [...rows].sort(
+    (a, b) =>
+      b.avgEndlaufPointsCounted - a.avgEndlaufPointsCounted ||
+      b.avgEndlaufPoints - a.avgEndlaufPoints ||
+      a.name.localeCompare(b.name, "de"),
+  );
+  return (
+    <Card title={title} count={rows.length} countLabel={countLabel}>
+      <table className="w-full text-sm">
+        <thead className="text-xs tracking-wide text-[var(--color-muted)] uppercase">
+          <tr className="border-b border-[var(--color-border)]">
+            <th className="px-3 py-2 text-left">#</th>
+            <th className="px-3 py-2 text-left">{countLabel === "Vereine" ? "Verein" : "Region"}</th>
+            <th className="px-3 py-2 text-right" title="Endlauf-Punkte pro Fahrer, nur gezählte Ergebnisse (Streichresultat ausgenommen)">
+              Ø gezählt
+            </th>
+            <th className={num} title="Endlauf-Punkte pro Fahrer, alle Endlauf-Ergebnisse (auch gestrichene)">
+              Ø alle
+            </th>
+            <th className={cn(num, "border-l border-[var(--color-border)]")} title="Summe der gezählten Endlauf-Punkte">
+              Σ gezählt
+            </th>
+            <th className={num} title="Summe aller Endlauf-Punkte (auch gestrichene)">
+              Σ alle
+            </th>
+            <th className={num}>Fahrer</th>
+            <th className={num} title="Gestartete Endlauf-Ergebnisse">
+              Starts
+            </th>
+            <th className={num} title="Endlauf-Ergebnisse, die als Streichresultat wegfallen">
+              gestrichen
+            </th>
+          </tr>
+        </thead>
+        <tbody>
+          {sorted.map((s, i) => {
+            const isHome = s.name === highlightName;
+            return (
+              <Row key={s.id} s={s} i={i} isHome={isHome}>
+                <td className="px-3 py-2 text-right text-base font-semibold tabular-nums">
+                  {s.endlaufStarts ? formatPoints(s.avgEndlaufPointsCounted) : "—"}
+                </td>
+                <td className={num}>{s.endlaufStarts ? formatPoints(s.avgEndlaufPoints) : "—"}</td>
+                <td className={cn(muted, "border-l border-[var(--color-border)]")}>
+                  {s.endlaufPointsCounted ? formatPoints(s.endlaufPointsCounted) : "—"}
+                </td>
+                <td className={muted}>{s.endlaufPoints ? formatPoints(s.endlaufPoints) : "—"}</td>
+                <td className={num}>{s.driverCount}</td>
+                <td className={num}>{s.endlaufStarts || "—"}</td>
+                <td className={muted}>{s.endlaufDropped || "—"}</td>
+              </Row>
+            );
+          })}
+        </tbody>
+      </table>
+    </Card>
+  );
+}
+
+/**
  * Places gained / lost in the championship through the Endläufe, per club or
  * region: per Endlauf and in total, plus the net movement per driver.
  */

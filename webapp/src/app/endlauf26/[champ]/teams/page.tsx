@@ -4,7 +4,11 @@ import { AiQuotes } from "@/components/endlauf26/ai-quotes.client";
 import { ChampHeader } from "@/components/endlauf26/champ-header";
 import { FastestLapsTable } from "@/components/endlauf26/fastest-laps-table";
 import { GermanFlag } from "@/components/endlauf26/german-flag";
-import { GroupMovementTable, GroupPointsTable } from "@/components/endlauf26/group-stats-tables";
+import {
+  GroupEndlaufPointsTable,
+  GroupMovementTable,
+  GroupPointsTable,
+} from "@/components/endlauf26/group-stats-tables";
 import { isAdminSession } from "@/lib/admin-auth";
 import {
   getEndlaufChampionship,
@@ -111,7 +115,10 @@ export default async function EndlaufTeamsPage({
         = Fahrer, die in der aktuellen Wertung auf Platz 1 / 1–3
         {championship === "hmj" ? ` / einem Startplatz für die ${DKM_NAME}` : ""} ihrer Klasse stehen. Siege /
         Podien = Ergebnisse in den Endläufen. Schn. Rd. = schnellste Einzelrunde je Klasse und Endlauf (ohne /
-        mit Strafsekunden). Saldo = Veränderung der Meisterschaftsplätze durch die Endläufe, summiert über alle
+        mit Strafsekunden).
+        {hasDrops &&
+          " Endlauf-Punkte = nur die Punkte aus Langgöns 1 & 2 (×1,25) pro Fahrer – „gezählt“ ohne Streichresultate, „alle“ mit jedem Endlauf-Ergebnis."}{" "}
+        Saldo = Veränderung der Meisterschaftsplätze durch die Endläufe, summiert über alle
         Fahrer; pro Fahrer = Saldo geteilt durch die Fahrer mit gewertetem Endlauf.
       </p>
 
@@ -136,6 +143,14 @@ export default async function EndlaufTeamsPage({
             countLabel="Vereine"
           />
         </div>
+        {hasDrops && (
+          <GroupEndlaufPointsTable
+            title="Endlauf-Punkte pro Fahrer (Ø) – nur Langgöns"
+            rows={teams}
+            highlightName={HOME_TEAM}
+            countLabel="Vereine"
+          />
+        )}
         <GroupMovementTable
           title="Plätze gewonnen / verloren in den Endläufen"
           rows={teams}
@@ -166,6 +181,14 @@ export default async function EndlaufTeamsPage({
             countLabel={regionCountLabel}
           />
         </div>
+        {hasDrops && (
+          <GroupEndlaufPointsTable
+            title="Endlauf-Punkte pro Fahrer (Ø) – nur Langgöns"
+            rows={regions}
+            highlightName={HOME_REGION}
+            countLabel={regionCountLabel}
+          />
+        )}
         <GroupMovementTable
           title="Plätze gewonnen / verloren in den Endläufen"
           rows={regions}

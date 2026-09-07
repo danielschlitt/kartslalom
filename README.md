@@ -157,7 +157,10 @@ no national final.
 - points tables (total and Ø per driver) with class leaders, championship
   podiums, DKM spots, Endlauf wins/podiums, fastest laps and drivers per class;
   for hmj in two variants — official scoring with Streichresultat (default)
-  and `?drops=off` with every race counted;
+  and `?drops=off` with every race counted; hmj additionally gets
+  **Endlauf-Punkte pro Fahrer (Ø) – nur Langgöns**: points from the two
+  Endläufe alone, Ø per driver, once with every Endlauf result ("alle") and
+  once with struck results excluded ("gezählt");
 - places gained / lost in the championship through each Endlauf (sum of the
   per-driver movement arrows), in total and per driver;
 - the fastest single run per Endlauf and class, once without and once with

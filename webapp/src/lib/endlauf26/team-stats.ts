@@ -48,8 +48,18 @@ export interface GroupStatRow {
   /** Sum of championship totals. */
   totalPoints: number;
   avgPoints: number;
-  /** Points from Endläufe only (effective, incl. factor, incl. dropped). */
+  /** Points from Endläufe only (effective, incl. factor, incl. dropped results). */
   endlaufPoints: number;
+  /** Points from Endläufe that count (dropped Streichresultate excluded). */
+  endlaufPointsCounted: number;
+  /** endlaufPoints / driverCount */
+  avgEndlaufPoints: number;
+  /** endlaufPointsCounted / driverCount */
+  avgEndlaufPointsCounted: number;
+  /** Endlauf results of the group's drivers (started). */
+  endlaufStarts: number;
+  /** … of which struck as Streichresultat. */
+  endlaufDropped: number;
   /** Endlauf wins (finish position 1). */
   endlaufWins: number;
   /** Endlauf podiums (1–3). */
@@ -169,6 +179,11 @@ export function computeGroupStats(
         totalPoints: 0,
         avgPoints: 0,
         endlaufPoints: 0,
+        endlaufPointsCounted: 0,
+        avgEndlaufPoints: 0,
+        avgEndlaufPointsCounted: 0,
+        endlaufStarts: 0,
+        endlaufDropped: 0,
         endlaufWins: 0,
         endlaufPodiums: 0,
         classLeaders: 0,
@@ -207,6 +222,9 @@ export function computeGroupStats(
     for (const c of r.cells) {
       if (c.kind !== "endlauf" || !c.available) continue;
       s.endlaufPoints = round2(s.endlaufPoints + c.points);
+      if (c.dropped) s.endlaufDropped += 1;
+      else s.endlaufPointsCounted = round2(s.endlaufPointsCounted + c.points);
+      if (c.started) s.endlaufStarts += 1;
       if (c.position === 1) s.endlaufWins += 1;
       if (c.position !== null && c.position <= 3) s.endlaufPodiums += 1;
     }
@@ -258,6 +276,8 @@ export function computeGroupStats(
   const out = [...byGroup.values()];
   for (const s of out) {
     s.avgPoints = round2(s.totalPoints / s.driverCount);
+    s.avgEndlaufPoints = round2(s.endlaufPoints / s.driverCount);
+    s.avgEndlaufPointsCounted = round2(s.endlaufPointsCounted / s.driverCount);
     s.gainedTotal = s.movement.reduce((a, m) => a + m.gained, 0);
     s.lostTotal = s.movement.reduce((a, m) => a + m.lost, 0);
     s.netMovement = s.gainedTotal - s.lostTotal;
