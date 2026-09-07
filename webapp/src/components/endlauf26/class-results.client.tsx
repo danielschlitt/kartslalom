@@ -3,7 +3,7 @@
 /**
  * Official results of one age class at one Endlauf, with alternative
  * scorings on top:
- *   Offiziell · Nur schnellste Runde · Ohne Fehler · Nur Fehler
+ *   Offiziell · Nur schnellste Runde · Nur schnellste Runde (mit Fehlern) · Ohne Fehler · Nur Fehler
  *
  * The official order is the printed list. The alternatives are "what if"
  * views computed client-side; in the time-based ones a Diff column shows the
@@ -17,6 +17,7 @@ import { AlertTriangle, ImageIcon, Info } from "lucide-react";
 import {
   diffSeconds,
   formatDiff,
+  runWithPenalty,
   SCORING_MODES,
   scoreRows,
   type ScoringMode,
@@ -53,7 +54,7 @@ export function ClassResults({
   const [refDriver, setRefDriver] = useState<number | null>(null);
 
   const scored = useMemo(() => scoreRows(rows, mode), [rows, mode]);
-  const timeMode = mode === "fastest" || mode === "no-penalty";
+  const timeMode = mode === "fastest" || mode === "fastest-penalty" || mode === "no-penalty";
   const refValue = useMemo(() => {
     if (!timeMode) return null;
     const ref =
@@ -179,7 +180,11 @@ export function ClassResults({
                   <th className="px-2 py-2 text-right">Lauf 2</th>
                   {mode === "official" && <th className="px-2 py-2 text-right">Fehler</th>}
                   <th className="px-2 py-2 text-right">
-                    {mode === "official" ? "Gesamt" : mode === "fastest" ? "Schnellste" : "Summe"}
+                    {mode === "official"
+                      ? "Gesamt"
+                      : mode === "fastest" || mode === "fastest-penalty"
+                        ? "Schnellste"
+                        : "Summe"}
                   </th>
                   {timeMode && <th className="px-2 py-2 text-right">Diff</th>}
                 </>
@@ -206,7 +211,12 @@ export function ClassResults({
                   ? r.run1Time <= r.run2Time
                     ? 1
                     : 2
-                  : null;
+                  : mode === "fastest-penalty" && r.run1Time !== null && r.run2Time !== null
+                    ? (runWithPenalty(r.run1Time, r.run1Penalty) ?? 0) <=
+                      (runWithPenalty(r.run2Time, r.run2Penalty) ?? 0)
+                      ? 1
+                      : 2
+                    : null;
               return (
                 <tr
                   key={r.id}

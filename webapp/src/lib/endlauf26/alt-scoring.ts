@@ -4,7 +4,12 @@
  * client-safe; the official order (`position`) is never touched by these.
  */
 
-export type ScoringMode = "official" | "fastest" | "no-penalty" | "penalty-only";
+export type ScoringMode =
+  | "official"
+  | "fastest"
+  | "fastest-penalty"
+  | "no-penalty"
+  | "penalty-only";
 
 export const SCORING_MODES: { id: ScoringMode; label: string; hint: string }[] = [
   {
@@ -16,6 +21,11 @@ export const SCORING_MODES: { id: ScoringMode; label: string; hint: string }[] =
     id: "fastest",
     label: "Nur schnellste Runde",
     hint: "Nur die schnellere der beiden Laufzeiten zählt — ohne Strafsekunden.",
+  },
+  {
+    id: "fastest-penalty",
+    label: "Nur schnellste Runde (mit Fehlern)",
+    hint: "Nur der bessere der beiden Läufe zählt — Laufzeit inkl. Strafsekunden.",
   },
   {
     id: "no-penalty",
@@ -67,6 +77,20 @@ export function fastestRun(r: ScorableResult): number | null {
   return Math.min(r.run1Time, r.run2Time);
 }
 
+/** Run time + its penalty seconds; null when the run has no time. */
+export function runWithPenalty(time: number | null, penalty: number): number | null {
+  return time === null ? null : round3(time + penalty);
+}
+
+/** The better of the two runs, each counted with its own penalty seconds. */
+export function fastestRunWithPenalty(r: ScorableResult): number | null {
+  const a = runWithPenalty(r.run1Time, r.run1Penalty);
+  const b = runWithPenalty(r.run2Time, r.run2Penalty);
+  if (a === null) return b;
+  if (b === null) return a;
+  return Math.min(a, b);
+}
+
 export function rawSum(r: ScorableResult): number | null {
   if (r.run1Time === null || r.run2Time === null) return null;
   return round3(r.run1Time + r.run2Time);
@@ -113,6 +137,10 @@ export function scoreRows<T extends ScorableResult>(
       }
       case "fastest": {
         const v = fastestRun(row);
+        return { row, key: [v], value: v, secondary: null };
+      }
+      case "fastest-penalty": {
+        const v = fastestRunWithPenalty(row);
         return { row, key: [v], value: v, secondary: null };
       }
       case "no-penalty": {

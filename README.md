@@ -124,7 +124,8 @@ start orders stay.
 
 Public event pages (`/endlauf26/[champ]/events/[slug]`) show the imported list
 per class plus alternative "what if" scorings — **Nur schnellste Runde**
-(fastest single run, no penalties), **Ohne Fehler** (Lauf 1 + Lauf 2, no
+(fastest single run, no penalties), **Nur schnellste Runde (mit Fehlern)**
+(best single run counted with its penalty seconds), **Ohne Fehler** (Lauf 1 + Lauf 2, no
 penalties), **Nur Fehler** (by penalty seconds, tie → Gesamtzeit) — with a Diff
 column to the leader or, after clicking a row, to that driver. Rows link to the
 photo of the list.

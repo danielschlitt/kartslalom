@@ -84,7 +84,7 @@ export default async function EndlaufEventPage({
 
       <p className="text-xs text-[var(--color-muted)]">
         Platz und Punkte stammen aus der fotografierten offiziellen Ergebnisliste je Klasse. Die
-        Ansichten „Nur schnellste Runde“, „Ohne Fehler“ und „Nur Fehler“ sind Was-wäre-wenn-Wertungen
+        Ansichten „Nur schnellste Runde“ (ohne und mit Fehlern), „Ohne Fehler“ und „Nur Fehler“ sind Was-wäre-wenn-Wertungen
         und ändern nichts an der offiziellen Reihenfolge.
       </p>
 
