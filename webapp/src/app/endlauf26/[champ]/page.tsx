@@ -2,6 +2,7 @@ import Link from "next/link";
 import { notFound } from "next/navigation";
 import { ChampHeader } from "@/components/endlauf26/champ-header";
 import { EndlaufChampionshipTable } from "@/components/endlauf26/championship-table";
+import { GermanFlag } from "@/components/endlauf26/german-flag";
 import { FileText } from "lucide-react";
 import {
   getDocuments,
@@ -13,6 +14,7 @@ import { ENDLAUF26_DOCUMENT_SLOTS } from "@/lib/endlauf26/documents";
 import {
   ageClassName,
   championshipFromSlug,
+  DKM_NAME,
   ENDLAUF26_SLUGS,
 } from "@/lib/endlauf26/ranking";
 import { cn } from "@/lib/utils";
@@ -161,7 +163,9 @@ function Legend({ championship }: { championship: "hmj" | "adac_hth" }) {
           <span className="font-semibold text-[var(--color-live)]">abgemeldet</span> = tritt bei
           den Endläufen nicht an (nicht gewertet),{" "}
           <span className="font-semibold text-[var(--color-accent)]">Nachrücker</span> = war in
-          der Liste nicht grün markiert, startet aber bei den Endläufen.
+          der Liste nicht grün markiert, startet aber bei den Endläufen.{" "}
+          <GermanFlag className="mx-0.5" /> = Platz qualifiziert für die {DKM_NAME} (K1: 1–2, K2–K4: 1–3,
+          K5: 1–2).
         </>
       ) : (
         <>

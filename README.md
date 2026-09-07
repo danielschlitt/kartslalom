@@ -142,6 +142,36 @@ default `gpt-5.6`) only phrases those facts. The text is cached per driver in
 `endlauf26_predictions` and regenerated when the standings change. Without an
 API key a rule-based sentence is shown instead.
 
+### National finals (DKM)
+
+In the hmj tables the positions that qualify for the *Deutsche Kartslalom
+Meisterschaft der dmsj* carry a small German flag (Klasse 1: 1–2, Klasse 2–4:
+1–3, Klasse 5: 1–2; `HMJ_DKM_SPOTS` in `lib/endlauf26/ranking.ts`). ADAC has
+no national final.
+
+### Vereine & Regionen (teams page)
+
+`/endlauf26/[champ]/teams` groups the championship by club and by region
+(hmj: Verband Süd / Nord / DMV, ADAC: Region Nord / Süd / Ost):
+
+- points tables (total and Ø per driver) with class leaders, championship
+  podiums, DKM spots, Endlauf wins/podiums, fastest laps and drivers per class;
+  for hmj in two variants — official scoring with Streichresultat (default)
+  and `?drops=off` with every race counted;
+- places gained / lost in the championship through each Endlauf (sum of the
+  per-driver movement arrows), in total and per driver;
+- the fastest single run per Endlauf and class, once without and once with
+  penalty seconds (`lib/endlauf26/team-stats.ts`);
+- **Zitate für Social Media**: German one-liners about `HOME_TEAM` (OAMC
+  Reinheim) and `HOME_REGION` (Süd) — how much more likely a driver of the club
+  becomes Hessenmeister / stands on the podium / qualifies for the DKM compared
+  to the rest of the field, share of fastest laps, places gained, clean runs …
+  The numbers are computed deterministically (`buildSubjectFacts`), OpenAI
+  (`OPENAI_PREDICTION_MODEL`) only phrases them; cached in `endlauf26_quotes`
+  per (championship, subject) until the facts change, rule-based fallback
+  without an API key. Clicking a quote copies it; admins get a **Neu** button
+  to re-phrase (`GET /api/endlauf26/quotes/[champ]?subject=team|region&refresh=1`).
+
 ### Source PDFs
 
 The standings PDFs the field was derived from are stored in the database

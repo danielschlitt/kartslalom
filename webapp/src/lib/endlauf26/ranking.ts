@@ -69,6 +69,39 @@ export function ageClassName(n: number): string {
   return `Klasse ${n}`;
 }
 
+/* ─────────────────── national finals (DKM der dmsj) ─────────────────── */
+
+/**
+ * hmj only: the top positions of the final hmj standings per age class go to
+ * the "Deutsche Kartslalom Meisterschaft der dmsj" (national finals).
+ * Class 6 has no national final.
+ */
+export const HMJ_DKM_SPOTS: Readonly<Record<number, number>> = {
+  1: 2,
+  2: 3,
+  3: 3,
+  4: 3,
+  5: 2,
+};
+
+export const DKM_NAME = "Deutsche Kartslalom Meisterschaft der dmsj";
+
+/** Number of national-finals spots of an age class (0 for adac_hth / class 6). */
+export function dkmSpots(championship: Endlauf26Championship, ageClass: number): number {
+  if (championship !== "hmj") return 0;
+  return HMJ_DKM_SPOTS[ageClass] ?? 0;
+}
+
+/** Whether a (ranked) position of an age class qualifies for the national finals. */
+export function qualifiesForDkm(
+  championship: Endlauf26Championship,
+  ageClass: number,
+  rank: number | null,
+): boolean {
+  if (rank === null) return false;
+  return rank <= dkmSpots(championship, ageClass);
+}
+
 /* ────────────────────────────── points ────────────────────────────── */
 
 const POINTS_TABLE: readonly number[] = [
@@ -599,57 +632,4 @@ export function computeEndlauf26Championship(
 
 function rankMap(rows: readonly Endlauf26Row[]): Map<number, number | null> {
   return new Map(rows.map((r) => [r.driverId, r.rank]));
-}
-
-/* ───────────────────────────── club stats ───────────────────────────── */
-
-export interface ClubStatRow {
-  teamId: number;
-  teamName: string;
-  driverCount: number;
-  /** Sum of championship totals (incl. Streichergebnisse rules). */
-  totalPoints: number;
-  avgPoints: number;
-  /** Endlauf wins (finish position 1). */
-  endlaufWins: number;
-  /** Endlauf podiums (1–3). */
-  endlaufPodiums: number;
-  /** Drivers currently leading their class. */
-  classLeaders: number;
-  /** Points from Endläufe only (effective, incl. factor). */
-  endlaufPoints: number;
-}
-
-export function computeClubStats(rows: readonly Endlauf26Row[]): ClubStatRow[] {
-  const byTeam = new Map<number, ClubStatRow>();
-  for (const r of rows) {
-    let s = byTeam.get(r.teamId);
-    if (!s) {
-      s = {
-        teamId: r.teamId,
-        teamName: r.teamName,
-        driverCount: 0,
-        totalPoints: 0,
-        avgPoints: 0,
-        endlaufWins: 0,
-        endlaufPodiums: 0,
-        classLeaders: 0,
-        endlaufPoints: 0,
-      };
-      byTeam.set(r.teamId, s);
-    }
-    s.driverCount += 1;
-    s.totalPoints = round2(s.totalPoints + r.totalPoints);
-    if (r.rank === 1) s.classLeaders += 1;
-    for (const c of r.cells) {
-      if (c.kind !== "endlauf" || !c.available) continue;
-      s.endlaufPoints = round2(s.endlaufPoints + c.points);
-      if (c.position === 1) s.endlaufWins += 1;
-      if (c.position !== null && c.position <= 3) s.endlaufPodiums += 1;
-    }
-  }
-  const out = [...byTeam.values()];
-  for (const s of out) s.avgPoints = round2(s.totalPoints / s.driverCount);
-  out.sort((a, b) => b.totalPoints - a.totalPoints || a.teamName.localeCompare(b.teamName, "de"));
-  return out;
 }

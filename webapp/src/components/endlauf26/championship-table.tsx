@@ -1,10 +1,13 @@
-import type {
-  Endlauf26Championship,
-  Endlauf26Row,
-  EndlaufEventInfo,
-  ScoreCell,
+import {
+  dkmSpots,
+  qualifiesForDkm,
+  type Endlauf26Championship,
+  type Endlauf26Row,
+  type EndlaufEventInfo,
+  type ScoreCell,
 } from "@/lib/endlauf26/ranking";
 import { formatFactor, formatPoints } from "@/lib/endlauf26/format";
+import { GermanFlag } from "@/components/endlauf26/german-flag";
 import { Movement } from "@/components/endlauf26/movement";
 import {
   stickyBodyBg,
@@ -37,6 +40,8 @@ export function EndlaufChampionshipTable({
     kind: c.kind,
   })) ?? [];
   const groupLabel = championship === "hmj" ? "Verband" : "Region";
+  const ageClass = rows[0]?.ageClass ?? null;
+  const spots = ageClass === null ? 0 : dkmSpots(championship, ageClass);
 
   return (
     <div className="rounded-lg border border-[var(--color-border)] bg-[var(--color-surface)]">
@@ -44,8 +49,13 @@ export function EndlaufChampionshipTable({
         <h3 className="text-sm font-semibold tracking-wider text-[var(--color-muted)] uppercase">
           {ageClassName}
         </h3>
-        <span className="text-xs text-[var(--color-muted)]">
-          {rows.length} Fahrer
+        <span className="flex items-center gap-3 text-xs text-[var(--color-muted)]">
+          {spots > 0 && (
+            <span className="inline-flex items-center gap-1" title="Startplätze bei der Deutschen Kartslalom Meisterschaft der dmsj">
+              <GermanFlag /> {spots} DKM-Plätze
+            </span>
+          )}
+          <span>{rows.length} Fahrer</span>
         </span>
       </div>
       <div className="overflow-x-auto">
@@ -119,6 +129,7 @@ export function EndlaufChampionshipTable({
                       shared={r.sharedRank}
                       excluded={r.excluded}
                       isHome={isHome}
+                      dkm={!r.excluded && qualifiesForDkm(championship, r.ageClass, r.rank)}
                     />
                   </td>
                   <td
@@ -196,11 +207,14 @@ function RankCell({
   shared,
   excluded,
   isHome,
+  dkm = false,
 }: {
   rank: number | null;
   shared: boolean;
   excluded: boolean;
   isHome: boolean;
+  /** Position qualifies for the national finals (DKM der dmsj) → small German flag. */
+  dkm?: boolean;
 }) {
   if (excluded || rank === null) {
     return (
@@ -212,7 +226,7 @@ function RankCell({
   return (
     <span
       className={cn(
-        "inline-flex h-7 w-7 items-center justify-center rounded-md text-xs font-semibold tabular-nums",
+        "relative inline-flex h-7 w-7 items-center justify-center rounded-md text-xs font-semibold tabular-nums",
         isHome && !shared && "bg-[var(--color-rank-blue)] text-white",
       )}
       style={
@@ -223,6 +237,9 @@ function RankCell({
       title={shared ? "Punktgleich — gleicher Platz" : undefined}
     >
       {rank}.
+      {dkm && (
+        <GermanFlag className="absolute -top-1 -right-1.5 h-2 w-3 shadow-[0_0_0_1px_var(--color-surface)]" />
+      )}
     </span>
   );
 }

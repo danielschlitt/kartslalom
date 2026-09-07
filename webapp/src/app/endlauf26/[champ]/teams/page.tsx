@@ -1,146 +1,241 @@
+import Link from "next/link";
 import { notFound } from "next/navigation";
+import { AiQuotes } from "@/components/endlauf26/ai-quotes.client";
 import { ChampHeader } from "@/components/endlauf26/champ-header";
-import { getEndlaufChampionship, getLiveEndlaufEvent } from "@/lib/dal/endlauf26";
-import { formatPoints } from "@/lib/endlauf26/format";
+import { FastestLapsTable } from "@/components/endlauf26/fastest-laps-table";
+import { GermanFlag } from "@/components/endlauf26/german-flag";
+import { GroupMovementTable, GroupPointsTable } from "@/components/endlauf26/group-stats-tables";
+import { isAdminSession } from "@/lib/admin-auth";
 import {
-  ageClassName,
-  championshipFromSlug,
-  computeClubStats,
-} from "@/lib/endlauf26/ranking";
-import { HOME_TEAM, HOME_TEAM_BG } from "@/lib/endlauf26/home-team";
+  getEndlaufChampionship,
+  getEndlaufResultsForChampionship,
+  getLiveEndlaufEvent,
+  toEventInfo,
+} from "@/lib/dal/endlauf26";
+import { HOME_REGION, HOME_TEAM } from "@/lib/endlauf26/home-team";
+import { championshipFromSlug, DKM_NAME, ENDLAUF26_SLUGS } from "@/lib/endlauf26/ranking";
+import { computeGroupStats, regionLabel } from "@/lib/endlauf26/team-stats";
 import { cn } from "@/lib/utils";
 
 export const dynamic = "force-dynamic";
 
+/**
+ * Club and region statistics of a championship.
+ *
+ * Two variants of every points table: with the official scoring (hmj: the
+ * worst of 7 results is a Streichresultat) and — `?drops=off` — with every
+ * race counted. The movement tables (places gained / lost through the
+ * Endläufe), the fastest laps and the social-media quotes follow the same
+ * switch; the quotes always use the official scoring.
+ */
 export default async function EndlaufTeamsPage({
   params,
+  searchParams,
 }: {
   params: Promise<{ champ: string }>;
+  searchParams: Promise<{ drops?: string }>;
 }) {
   const { champ } = await params;
+  const sp = await searchParams;
   const championship = championshipFromSlug(champ);
   if (!championship) notFound();
+  const slug = ENDLAUF26_SLUGS[championship];
+  const base = `/endlauf26/${slug}`;
+  const hasDrops = championship === "hmj";
+  const applyDrops = !hasDrops || sp.drops !== "off";
 
-  const [data, liveEvent] = await Promise.all([
-    getEndlaufChampionship(championship),
+  const [data, results, liveEvent, isAdmin] = await Promise.all([
+    getEndlaufChampionship(championship, { applyDrops }),
+    getEndlaufResultsForChampionship(championship),
     getLiveEndlaufEvent(championship),
+    isAdminSession(),
   ]);
-  const stats = computeClubStats(data.rows);
-  const byAvg = [...stats].sort((a, b) => b.avgPoints - a.avgPoints);
-
-  // Drivers per class per team for the detail table
+  const events = data.events.map(toEventInfo);
   const classes = [...new Set(data.rows.map((r) => r.ageClass))].sort((a, b) => a - b);
-  const perClass = new Map<number, Map<number, number>>();
-  for (const r of data.rows) {
-    const m = perClass.get(r.teamId) ?? new Map<number, number>();
-    m.set(r.ageClass, (m.get(r.ageClass) ?? 0) + 1);
-    perClass.set(r.teamId, m);
-  }
+
+  const teams = computeGroupStats(championship, "team", data.rows, events, results);
+  const teamsByAvg = [...teams].sort((a, b) => b.avgPoints - a.avgPoints || a.name.localeCompare(b.name, "de"));
+  const regions = computeGroupStats(championship, "region", data.rows, events, results);
+  const regionsByAvg = [...regions].sort((a, b) => b.avgPoints - a.avgPoints || a.name.localeCompare(b.name, "de"));
+  const regionWord = regionLabel(championship);
+  const regionCountLabel = championship === "hmj" ? "Verbände" : "Regionen";
+
+  const scoredEvents = data.events.filter((e) => (data.scored.get(e.id)?.size ?? 0) > 0);
+  const variantLabel = applyDrops
+    ? hasDrops
+      ? "nur gezählte Ergebnisse (Streichresultat an)"
+      : "alle Endläufe (kein Streichresultat)"
+    : "alle Läufe und Endläufe (Streichresultat aus)";
 
   return (
     <div className="space-y-6">
       <ChampHeader
         championship={championship}
         active="teams"
-        title="Vereinswertung"
-        subtitle="Summe der Meisterschaftspunkte aller Fahrer eines Vereins (inkl. Endlauf-Faktoren und Streichresultaten)"
+        title="Vereine & Regionen"
+        subtitle={`Vereins- und ${regionWord}swertung, gewonnene und verlorene Plätze, schnellste Runden und Zitate · ${variantLabel}`}
         isLive={!!liveEvent}
       />
 
-      <div className="grid grid-cols-1 gap-6 lg:grid-cols-2">
-        <StatsTable
-          title="Gesamtpunkte"
-          rows={stats}
-          value={(s) => formatPoints(s.totalPoints)}
-          classes={classes}
-          perClass={perClass}
-        />
-        <StatsTable
-          title="Punkte pro Fahrer (Ø)"
-          rows={byAvg}
-          value={(s) => formatPoints(s.avgPoints)}
-          classes={classes}
-          perClass={perClass}
-        />
+      <div className="flex flex-wrap items-center justify-between gap-3 text-xs text-[var(--color-muted)]">
+        <div className="flex flex-wrap gap-1.5">
+          {hasDrops ? (
+            <>
+              <VariantChip href={`${base}/teams`} active={applyDrops} label="Nur gezählte Ergebnisse" hint="Streichresultat an — wie in der offiziellen Wertung" />
+              <VariantChip href={`${base}/teams?drops=off`} active={!applyDrops} label="Alle Läufe" hint="Streichresultat aus — jedes Ergebnis zählt" />
+            </>
+          ) : (
+            <span>Alle drei Endläufe zählen — es gibt kein Streichresultat, daher nur eine Variante.</span>
+          )}
+        </div>
+        <span>
+          Stand:{" "}
+          {scoredEvents.length
+            ? `nach ${scoredEvents.map((e) => e.name).join(" & ")}`
+            : "vor dem ersten Endlauf"}
+          {" · "}
+          <Link href={base} className="hover:text-[var(--color-foreground)] hover:underline">
+            zur Wertung →
+          </Link>
+        </span>
       </div>
+
+      <p className="text-xs text-[var(--color-muted)]">
+        Punkte = Summe der Meisterschaftspunkte aller Fahrer (inkl. Endlauf-Faktoren
+        {hasDrops && applyDrops ? " und Streichresultaten" : ""}). Führende / Top 3
+        {championship === "hmj" && (
+          <>
+            {" "}/ <GermanFlag className="mx-0.5" /> DKM
+          </>
+        )}{" "}
+        = Fahrer, die in der aktuellen Wertung auf Platz 1 / 1–3
+        {championship === "hmj" ? ` / einem Startplatz für die ${DKM_NAME}` : ""} ihrer Klasse stehen. Siege /
+        Podien = Ergebnisse in den Endläufen. Schn. Rd. = schnellste Einzelrunde je Klasse und Endlauf (ohne /
+        mit Strafsekunden). Saldo = Veränderung der Meisterschaftsplätze durch die Endläufe, summiert über alle
+        Fahrer; pro Fahrer = Saldo geteilt durch die Fahrer mit gewertetem Endlauf.
+      </p>
+
+      <Section title="Vereine">
+        <div className="grid grid-cols-1 gap-6 xl:grid-cols-2">
+          <GroupPointsTable
+            championship={championship}
+            title="Gesamtpunkte"
+            rows={teams}
+            mode="total"
+            classes={classes}
+            highlightName={HOME_TEAM}
+            countLabel="Vereine"
+          />
+          <GroupPointsTable
+            championship={championship}
+            title="Punkte pro Fahrer (Ø)"
+            rows={teamsByAvg}
+            mode="avg"
+            classes={classes}
+            highlightName={HOME_TEAM}
+            countLabel="Vereine"
+          />
+        </div>
+        <GroupMovementTable
+          title="Plätze gewonnen / verloren in den Endläufen"
+          rows={teams}
+          events={events}
+          highlightName={HOME_TEAM}
+          countLabel="Vereine"
+        />
+      </Section>
+
+      <Section title={regionCountLabel}>
+        <div className="grid grid-cols-1 gap-6 xl:grid-cols-2">
+          <GroupPointsTable
+            championship={championship}
+            title="Gesamtpunkte"
+            rows={regions}
+            mode="total"
+            classes={classes}
+            highlightName={HOME_REGION}
+            countLabel={regionCountLabel}
+          />
+          <GroupPointsTable
+            championship={championship}
+            title="Punkte pro Fahrer (Ø)"
+            rows={regionsByAvg}
+            mode="avg"
+            classes={classes}
+            highlightName={HOME_REGION}
+            countLabel={regionCountLabel}
+          />
+        </div>
+        <GroupMovementTable
+          title="Plätze gewonnen / verloren in den Endläufen"
+          rows={regions}
+          events={events}
+          highlightName={HOME_REGION}
+          countLabel={regionCountLabel}
+        />
+      </Section>
+
+      <FastestLapsTable
+        championship={championship}
+        rows={data.rows}
+        events={events}
+        results={results}
+        driverHref={(id) => `${base}/driver/${id}`}
+      />
+
+      <Section title="Zitate für Social Media">
+        <div className="grid grid-cols-1 gap-6 xl:grid-cols-2">
+          <AiQuotes champSlug={slug} subject="team" title={HOME_TEAM} isAdmin={isAdmin} />
+          <AiQuotes
+            champSlug={slug}
+            subject="region"
+            title={`${regionWord} ${HOME_REGION}`}
+            isAdmin={isAdmin}
+          />
+        </div>
+      </Section>
+
+      {data.rows.length === 0 && (
+        <p className="rounded-lg border border-[var(--color-border)] bg-[var(--color-surface)] p-6 text-center text-sm text-[var(--color-muted)]">
+          Noch keine Daten importiert. <code>make seed-endlauf26</code> ausführen.
+        </p>
+      )}
     </div>
   );
 }
 
-function StatsTable({
-  title,
-  rows,
-  value,
-  classes,
-  perClass,
+function Section({ title, children }: { title: string; children: React.ReactNode }) {
+  return (
+    <section className="space-y-4">
+      <h2 className="text-base font-semibold">{title}</h2>
+      {children}
+    </section>
+  );
+}
+
+function VariantChip({
+  href,
+  active,
+  label,
+  hint,
 }: {
-  title: string;
-  rows: ReturnType<typeof computeClubStats>;
-  value: (s: ReturnType<typeof computeClubStats>[number]) => string;
-  classes: number[];
-  perClass: Map<number, Map<number, number>>;
+  href: string;
+  active: boolean;
+  label: string;
+  hint: string;
 }) {
   return (
-    <div className="rounded-lg border border-[var(--color-border)] bg-[var(--color-surface)]">
-      <div className="flex items-center justify-between border-b border-[var(--color-border)] px-4 py-2">
-        <h3 className="text-sm font-semibold tracking-wider text-[var(--color-muted)] uppercase">
-          {title}
-        </h3>
-        <span className="text-xs text-[var(--color-muted)]">{rows.length} Vereine</span>
-      </div>
-      <div className="overflow-x-auto">
-        <table className="w-full text-sm">
-          <thead className="text-xs tracking-wide text-[var(--color-muted)] uppercase">
-            <tr className="border-b border-[var(--color-border)]">
-              <th className="px-3 py-2 text-left">#</th>
-              <th className="px-3 py-2 text-left">Verein</th>
-              <th className="px-3 py-2 text-right">{title === "Gesamtpunkte" ? "Punkte" : "Ø"}</th>
-              <th className="px-2 py-2 text-right">Fahrer</th>
-              <th className="px-2 py-2 text-right" title="Fahrer auf Platz 1 ihrer Klasse">Führende</th>
-              <th className="px-2 py-2 text-right" title="Endlauf-Siege">Siege</th>
-              <th className="px-2 py-2 text-right" title="Endlauf-Podien">Podien</th>
-              <th className="px-2 py-2 text-right" title="Punkte aus den Endläufen">Endlauf-Pkt.</th>
-              {classes.map((c) => (
-                <th key={c} className="px-2 py-2 text-right" title={ageClassName(c)}>
-                  K{c}
-                </th>
-              ))}
-            </tr>
-          </thead>
-          <tbody>
-            {rows.map((s, i) => {
-              const isHome = s.teamName === HOME_TEAM;
-              return (
-                <tr
-                  key={s.teamId}
-                  className="border-b border-[var(--color-border)]/50 last:border-0"
-                  style={isHome ? { backgroundColor: HOME_TEAM_BG } : undefined}
-                >
-                  <td className="px-3 py-2 tabular-nums">{i + 1}.</td>
-                  <td className={cn("px-3 py-2 font-medium", isHome && "text-white")}>
-                    {s.teamName}
-                  </td>
-                  <td className="px-3 py-2 text-right text-base font-semibold tabular-nums">
-                    {value(s)}
-                  </td>
-                  <td className="px-2 py-2 text-right tabular-nums">{s.driverCount}</td>
-                  <td className="px-2 py-2 text-right tabular-nums">{s.classLeaders || "—"}</td>
-                  <td className="px-2 py-2 text-right tabular-nums">{s.endlaufWins || "—"}</td>
-                  <td className="px-2 py-2 text-right tabular-nums">{s.endlaufPodiums || "—"}</td>
-                  <td className="px-2 py-2 text-right tabular-nums text-[var(--color-muted)]">
-                    {s.endlaufPoints ? formatPoints(s.endlaufPoints) : "—"}
-                  </td>
-                  {classes.map((c) => (
-                    <td key={c} className="px-2 py-2 text-right tabular-nums text-[var(--color-muted)]">
-                      {perClass.get(s.teamId)?.get(c) ?? "—"}
-                    </td>
-                  ))}
-                </tr>
-              );
-            })}
-          </tbody>
-        </table>
-      </div>
-    </div>
+    <Link
+      href={href}
+      title={hint}
+      className={cn(
+        "rounded-md border px-2 py-1",
+        active
+          ? "border-[var(--color-accent)]/60 bg-[var(--color-accent)]/10 text-[var(--color-foreground)]"
+          : "border-[var(--color-border)] text-[var(--color-muted)] hover:text-[var(--color-foreground)]",
+      )}
+    >
+      {label}
+    </Link>
   );
 }

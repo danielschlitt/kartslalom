@@ -7,6 +7,7 @@ import {
   endlauf26Entries,
   endlauf26Events,
   endlauf26Predictions,
+  endlauf26Quotes,
   endlauf26ResultImages,
   endlauf26Results,
   endlauf26SeasonResults,
@@ -328,6 +329,33 @@ export async function getEndlaufResults(
       asc(endlauf26Results.ageClass),
       sql`${endlauf26Results.position} nulls last`,
       asc(endlauf26Drivers.lastName),
+    );
+  return rows.map(({ r, ...d }) => mapResult(r, d));
+}
+
+/** Official results of every Endlauf of a championship (for statistics). */
+export async function getEndlaufResultsForChampionship(
+  championship: Endlauf26Championship,
+): Promise<EndlaufResultRow[]> {
+  const rows = await db
+    .select({
+      r: endlauf26Results,
+      firstName: endlauf26Drivers.firstName,
+      lastName: endlauf26Drivers.lastName,
+      qualified: endlauf26Drivers.qualified,
+      nominated: endlauf26Drivers.nominated,
+      withdrawn: endlauf26Drivers.withdrawn,
+      teamName: endlauf26Teams.name,
+    })
+    .from(endlauf26Results)
+    .innerJoin(endlauf26Events, eq(endlauf26Events.id, endlauf26Results.eventId))
+    .innerJoin(endlauf26Drivers, eq(endlauf26Drivers.id, endlauf26Results.driverId))
+    .innerJoin(endlauf26Teams, eq(endlauf26Teams.id, endlauf26Drivers.teamId))
+    .where(eq(endlauf26Events.championship, championship))
+    .orderBy(
+      asc(endlauf26Events.number),
+      asc(endlauf26Results.ageClass),
+      sql`${endlauf26Results.position} nulls last`,
     );
   return rows.map(({ r, ...d }) => mapResult(r, d));
 }
@@ -1127,5 +1155,46 @@ export async function saveCachedPrediction(p: {
     .onConflictDoUpdate({
       target: endlauf26Predictions.driverId,
       set: { stateHash: p.stateHash, text: p.text, model: p.model, createdAt: new Date() },
+    });
+}
+
+/* ───────────────────────── AI quotes cache (teams page) ───────────────────────── */
+
+export interface CachedQuotes {
+  stateHash: string;
+  quotes: string[];
+  model: string;
+  createdAt: string;
+}
+
+export async function getCachedQuotes(
+  championship: Endlauf26Championship,
+  subject: string,
+): Promise<CachedQuotes | null> {
+  const [row] = await db
+    .select()
+    .from(endlauf26Quotes)
+    .where(and(eq(endlauf26Quotes.championship, championship), eq(endlauf26Quotes.subject, subject)))
+    .limit(1);
+  if (!row) return null;
+  const quotes = Array.isArray(row.quotes)
+    ? (row.quotes as unknown[]).filter((q): q is string => typeof q === "string")
+    : [];
+  return { stateHash: row.stateHash, quotes, model: row.model, createdAt: row.createdAt.toISOString() };
+}
+
+export async function saveCachedQuotes(p: {
+  championship: Endlauf26Championship;
+  subject: string;
+  stateHash: string;
+  quotes: string[];
+  model: string;
+}): Promise<void> {
+  await db
+    .insert(endlauf26Quotes)
+    .values(p)
+    .onConflictDoUpdate({
+      target: [endlauf26Quotes.championship, endlauf26Quotes.subject],
+      set: { stateHash: p.stateHash, quotes: p.quotes, model: p.model, createdAt: new Date() },
     });
 }

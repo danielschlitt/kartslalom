@@ -3,6 +3,7 @@ import { notFound } from "next/navigation";
 import { AiPrediction } from "@/components/endlauf26/ai-prediction.client";
 import { ChampHeader } from "@/components/endlauf26/champ-header";
 import { EndlaufChampionshipTable } from "@/components/endlauf26/championship-table";
+import { GermanFlag } from "@/components/endlauf26/german-flag";
 import { Movement } from "@/components/endlauf26/movement";
 import {
   getEndlaufChampionship,
@@ -14,6 +15,7 @@ import {
   ageClassName,
   championshipFromSlug,
   ENDLAUF26_SLUGS,
+  qualifiesForDkm,
 } from "@/lib/endlauf26/ranking";
 
 export const dynamic = "force-dynamic";
@@ -58,6 +60,13 @@ export default async function EndlaufDriverPage({
           label="Platz"
           value={
             row.withdrawn ? "abgemeldet" : row.excluded ? "n. g." : row.rank ? `${row.rank}.` : "—"
+          }
+          hint={
+            !row.excluded && qualifiesForDkm(championship, row.ageClass, row.rank) ? (
+              <span className="inline-flex items-center gap-1">
+                <GermanFlag /> DKM-Platz
+              </span>
+            ) : undefined
           }
         />
         <Stat label="Punkte" value={formatPoints(row.totalPoints)} />
@@ -145,11 +154,20 @@ export default async function EndlaufDriverPage({
   );
 }
 
-function Stat({ label, value }: { label: string; value: string }) {
+function Stat({
+  label,
+  value,
+  hint,
+}: {
+  label: string;
+  value: string;
+  hint?: React.ReactNode;
+}) {
   return (
     <div className="rounded-lg border border-[var(--color-border)] bg-[var(--color-surface)] p-3">
       <div className="text-xs text-[var(--color-muted)]">{label}</div>
       <div className="text-lg font-semibold">{value}</div>
+      {hint && <div className="text-xs text-[var(--color-muted)]">{hint}</div>}
     </div>
   );
 }

@@ -312,6 +312,27 @@ export const endlauf26Predictions = pgTable("endlauf26_predictions", {
   createdAt: timestamp("created_at").defaultNow().notNull(),
 });
 
+/**
+ * Cached AI quotes for the teams page (social media snippets about the home
+ * club / home region). One row per (championship, subject); `stateHash`
+ * fingerprints the facts the quotes were generated from.
+ */
+export const endlauf26Quotes = pgTable(
+  "endlauf26_quotes",
+  {
+    id: serial("id").primaryKey(),
+    championship: endlauf26ChampionshipEnum("championship").notNull(),
+    /** "team" (home club) or "region" (home region). */
+    subject: text("subject").notNull(),
+    stateHash: text("state_hash").notNull(),
+    /** string[] — one quote per entry. */
+    quotes: jsonb("quotes").notNull(),
+    model: text("model").notNull(),
+    createdAt: timestamp("created_at").defaultNow().notNull(),
+  },
+  (t) => [unique("endlauf26_quotes_champ_subject_unique").on(t.championship, t.subject)],
+);
+
 /* Relations */
 
 export const endlauf26TeamsRelations = relations(endlauf26Teams, ({ many }) => ({
