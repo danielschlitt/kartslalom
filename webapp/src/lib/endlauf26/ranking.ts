@@ -11,10 +11,14 @@
  *     results) → younger driver wins → otherwise shared place
  *
  *  adac_hth (ADAC Hessen-Thüringen)
- *   - regular-season standing counts as one race (position → points)
+ *   - the field is the final start list (data/endlauf26/adac-hth_endlauf2026.csv)
+ *   - regional-championship position counts as one race (position → points;
+ *     several drivers may carry the same position/points)
  *   - 3 Endläufe (Crumbach, Reinheim, Malsfeld ×1.1), no Streichergebnis
  *   - a driver who misses a (scored) Endlauf is excluded from the ranking
  *   - same tie-break chain as hmj
+ *   - one DKM spot per class 1–5: the winner, or — if already qualified via
+ *     hmj — the next driver who is not (`assignDkmSpots`)
  *
  *  Field changes (both championships):
  *   - `withdrawn` drivers announced they will not compete. They keep their
@@ -72,8 +76,8 @@ export function ageClassName(n: number): string {
 /* ─────────────────── national finals (DKM der dmsj) ─────────────────── */
 
 /**
- * hmj only: the top positions of the final hmj standings per age class go to
- * the "Deutsche Kartslalom Meisterschaft der dmsj" (national finals).
+ * hmj: the top positions of the final hmj standings per age class go to the
+ * "Deutsche Kartslalom Meisterschaft der dmsj" (national finals).
  * Class 6 has no national final.
  */
 export const HMJ_DKM_SPOTS: Readonly<Record<number, number>> = {
@@ -84,22 +88,75 @@ export const HMJ_DKM_SPOTS: Readonly<Record<number, number>> = {
   5: 2,
 };
 
+/**
+ * adac_hth: the ADAC Hessen-Thüringen Endläufe award the last DKM spot per
+ * age class. It goes to the winner — unless the winner is already qualified
+ * through the hmj standings, then to the runner-up, and so on.
+ */
+export const ADAC_DKM_SPOTS: Readonly<Record<number, number>> = {
+  1: 1,
+  2: 1,
+  3: 1,
+  4: 1,
+  5: 1,
+};
+
 export const DKM_NAME = "Deutsche Kartslalom Meisterschaft der dmsj";
 
-/** Number of national-finals spots of an age class (0 for adac_hth / class 6). */
+/** Number of national-finals spots an age class awards in this championship (0 for class 6). */
 export function dkmSpots(championship: Endlauf26Championship, ageClass: number): number {
-  if (championship !== "hmj") return 0;
-  return HMJ_DKM_SPOTS[ageClass] ?? 0;
+  const table = championship === "hmj" ? HMJ_DKM_SPOTS : ADAC_DKM_SPOTS;
+  return table[ageClass] ?? 0;
 }
 
-/** Whether a (ranked) position of an age class qualifies for the national finals. */
-export function qualifiesForDkm(
+/**
+ * Championship a driver holds a DKM spot through. In the adac_hth table a
+ * driver already qualified via hmj is marked `"hmj"` and does not consume
+ * the ADAC spot.
+ */
+export type DkmVia = Endlauf26Championship;
+
+/**
+ * Assign the national-finals spots of every age class (sets `row.dkmVia`).
+ *
+ *  - hmj: ranks 1…n (n = HMJ_DKM_SPOTS) qualify.
+ *  - adac_hth: drivers for whom `qualifiedElsewhere` is true are marked
+ *    `"hmj"`; the best-ranked remaining driver(s) of the class get the ADAC
+ *    spot (a genuine dead heat on that rank flags all of them).
+ *
+ * Excluded / unranked rows never qualify.
+ */
+export function assignDkmSpots(
   championship: Endlauf26Championship,
-  ageClass: number,
-  rank: number | null,
-): boolean {
-  if (rank === null) return false;
-  return rank <= dkmSpots(championship, ageClass);
+  rows: Endlauf26Row[],
+  qualifiedElsewhere: (row: Endlauf26Row) => boolean = () => false,
+): void {
+  const byClass = new Map<number, Endlauf26Row[]>();
+  for (const r of rows) {
+    r.dkmVia = null;
+    byClass.set(r.ageClass, [...(byClass.get(r.ageClass) ?? []), r]);
+  }
+  for (const [ageClass, list] of byClass) {
+    const spots = dkmSpots(championship, ageClass);
+    if (championship === "hmj") {
+      for (const r of list) {
+        if (!r.excluded && r.rank !== null && r.rank <= spots) r.dkmVia = "hmj";
+      }
+      continue;
+    }
+    const contenders: Endlauf26Row[] = [];
+    for (const r of list) {
+      if (r.excluded || r.rank === null) continue;
+      if (qualifiedElsewhere(r)) r.dkmVia = "hmj";
+      else contenders.push(r);
+    }
+    if (spots <= 0 || contenders.length === 0) continue;
+    // The `spots` best ranks among the contenders; every row on such a rank gets a spot.
+    const ranks = [...new Set(contenders.map((r) => r.rank as number))]
+      .sort((a, b) => a - b)
+      .slice(0, spots);
+    for (const r of contenders) if (ranks.includes(r.rank as number)) r.dkmVia = "adac_hth";
+  }
 }
 
 /* ────────────────────────────── points ────────────────────────────── */
@@ -352,6 +409,11 @@ export interface Endlauf26Row {
   /** Rank before any Endlauf (season only). */
   rankBefore: number | null;
   movement: MovementCell[];
+  /**
+   * National finals: `"hmj"` = holds a DKM spot through the hmj standings,
+   * `"adac_hth"` = gets the ADAC spot of the class, null = none.
+   */
+  dkmVia: DkmVia | null;
 }
 
 export interface ChampionshipOptions {
@@ -359,6 +421,11 @@ export interface ChampionshipOptions {
   upToEventNumber?: number;
   /** When false, no Streichergebnis is applied (hmj). Defaults to true. */
   applyDrops?: boolean;
+  /**
+   * adac_hth: whether a driver already holds a DKM spot through the hmj
+   * standings (then the ADAC spot skips to the next driver).
+   */
+  qualifiedElsewhere?: (row: Endlauf26Row) => boolean;
 }
 
 const HMJ_DROP_COUNT = 1;
@@ -553,6 +620,7 @@ function computeRowsForClass(
       countback: countbackOf(cells),
       rankBefore: null,
       movement: [],
+      dkmVia: null,
     };
   });
   rankClass(rows);
@@ -627,6 +695,7 @@ export function computeEndlauf26Championship(
     }
     result.push(...finalRows);
   }
+  assignDkmSpots(championship, result, opts.qualifiedElsewhere);
   return result;
 }
 

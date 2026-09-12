@@ -15,7 +15,6 @@ import {
   ageClassName,
   championshipFromSlug,
   ENDLAUF26_SLUGS,
-  qualifiesForDkm,
 } from "@/lib/endlauf26/ranking";
 
 export const dynamic = "force-dynamic";
@@ -62,9 +61,13 @@ export default async function EndlaufDriverPage({
             row.withdrawn ? "abgemeldet" : row.excluded ? "n. g." : row.rank ? `${row.rank}.` : "—"
           }
           hint={
-            !row.excluded && qualifiesForDkm(championship, row.ageClass, row.rank) ? (
+            row.dkmVia === championship ? (
               <span className="inline-flex items-center gap-1">
-                <GermanFlag /> DKM-Platz
+                <GermanFlag /> {championship === "hmj" ? "DKM-Platz" : "DKM-Platz über die ADAC-Endläufe"}
+              </span>
+            ) : row.dkmVia === "hmj" ? (
+              <span className="inline-flex items-center gap-1">
+                <GermanFlag /> bereits über die hmj für die DKM qualifiziert
               </span>
             ) : undefined
           }

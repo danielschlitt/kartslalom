@@ -39,7 +39,14 @@ export default async function EndlaufChampionshipPage({
     getLiveEndlaufEvent(championship),
     getDocuments(championship),
   ]);
-  const slotLabel = new Map(ENDLAUF26_DOCUMENT_SLOTS[championship].map((s) => [s.key, s.label]));
+  const slots = ENDLAUF26_DOCUMENT_SLOTS[championship];
+  const slotLabel = new Map(slots.map((s) => [s.key, s.label]));
+  // Slot order (start list first), unknown keys last.
+  const slotIndex = (key: string) => {
+    const i = slots.findIndex((s) => s.key === key);
+    return i < 0 ? slots.length : i;
+  };
+  documents.sort((a, b) => slotIndex(a.key) - slotIndex(b.key));
 
   const classes = [...new Set(data.rows.map((r) => r.ageClass))].sort((a, b) => a - b);
   const selected = sp.klasse ? Number(sp.klasse) : null;
@@ -95,7 +102,11 @@ export default async function EndlaufChampionshipPage({
 
       {documents.length > 0 && (
         <p className="flex flex-wrap items-center gap-x-3 gap-y-1 text-xs text-[var(--color-muted)]">
-          <span>Grundlage (offizielle Listen, grün = qualifiziert):</span>
+          <span>
+            {championship === "hmj"
+              ? "Grundlage (offizielle Liste, grün = qualifiziert):"
+              : "Grundlage (finale Startliste; Zwischenstände der Regionen zur Information):"}
+          </span>
           {documents.map((d) => (
             <a
               key={d.id}
@@ -106,7 +117,7 @@ export default async function EndlaufChampionshipPage({
               title={d.filename}
             >
               <FileText className="h-3.5 w-3.5" />
-              {slotLabel.get(d.key) ?? d.filename} (PDF)
+              {slotLabel.get(d.key) ?? d.filename} ({d.mime === "text/csv" ? "CSV" : "PDF"})
             </a>
           ))}
         </p>
@@ -169,15 +180,26 @@ function Legend({ championship }: { championship: "hmj" | "adac_hth" }) {
         </>
       ) : (
         <>
-          Saisonplatz der Region zählt wie ein Rennen (Platz → Punkte). Malsfeld zählt ×1,1.
+          Fahrerfeld = finale Startliste. Der Platz in der Regionalmeisterschaft zählt wie ein Rennen
+          (Platz → Punkte; mehrere Fahrer können mit denselben Punkten starten). Malsfeld zählt ×1,1.
           Alle drei Endläufe sind Pflicht — wer einen (abgeschlossenen) Endlauf auslässt, wird als{" "}
           <span className="font-semibold text-[var(--color-live)]">n. g.</span> geführt. Punktgleich →
-          mehr bessere Platzierungen → jüngerer Fahrer → sonst gleicher Platz. Pfeile: Veränderung
-          der Meisterschaftsposition durch den jeweiligen Endlauf.{" "}
+          mehr bessere Platzierungen → jüngerer Fahrer → sonst{" "}
+          <span className="rounded-sm px-1" style={{ backgroundColor: "rgba(250,204,21,0.18)", color: "#fde047" }}>
+            gleicher Platz
+          </span>
+          . Pfeile: Veränderung der Meisterschaftsposition durch den jeweiligen Endlauf.{" "}
           <span className="font-semibold text-[var(--color-live)]">abgemeldet</span> = tritt bei
           den Endläufen nicht an (nicht gewertet),{" "}
-          <span className="font-semibold text-[var(--color-accent)]">Nachrücker</span> = war in
-          der Liste nicht grün markiert, startet aber bei den Endläufen.
+          <span className="font-semibold text-[var(--color-accent)]">Nachrücker</span> = laut
+          Startliste für einen frei gewordenen Platz nachgerückt.{" "}
+          <GermanFlag className="mx-0.5" /> am Platz = der letzte Startplatz je Klasse (K1–K5) für die{" "}
+          {DKM_NAME}: Er geht an den Sieger — ist der schon über die hmj qualifiziert, an den
+          Zweiten, dann an den Dritten usw.{" "}
+          <span className="inline-flex items-center gap-1 rounded-sm bg-[var(--color-surface-2)] px-1 text-[10px] font-semibold uppercase">
+            <GermanFlag className="h-2 w-3" title="" /> hmj
+          </span>{" "}
+          = bereits über die hmj-Wertung (Stand nach beiden Langgöns-Endläufen) qualifiziert.
         </>
       )}
     </p>

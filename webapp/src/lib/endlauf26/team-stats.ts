@@ -11,7 +11,6 @@
 import { fastestRun, fastestRunWithPenalty, type ScorableResult } from "./alt-scoring";
 import {
   dkmSpots,
-  qualifiesForDkm,
   type Endlauf26Championship,
   type Endlauf26Row,
   type EndlaufEventInfo,
@@ -68,7 +67,11 @@ export interface GroupStatRow {
   classLeaders: number;
   /** Drivers currently on a championship podium (rank 1–3). */
   podiumPlaces: number;
-  /** Drivers currently on a national-finals position (hmj only). */
+  /**
+   * Drivers currently on a national-finals position awarded by THIS
+   * championship (hmj: top ranks; ADAC: the class's spot). ADAC drivers who
+   * are already qualified via hmj are not counted here.
+   */
   dkmQualifiers: number;
   /** Per Endlauf: places gained / lost by the group's drivers. */
   movement: GroupMovement[];
@@ -217,7 +220,7 @@ export function computeGroupStats(
       s.rankedCount += 1;
       if (r.rank === 1) s.classLeaders += 1;
       if (r.rank <= 3) s.podiumPlaces += 1;
-      if (qualifiesForDkm(championship, r.ageClass, r.rank)) s.dkmQualifiers += 1;
+      if (r.dkmVia === championship) s.dkmQualifiers += 1;
     }
     for (const c of r.cells) {
       if (c.kind !== "endlauf" || !c.available) continue;
@@ -341,7 +344,7 @@ export interface SubjectFacts {
   avgPointsOthers: number;
   classLeaders: RateComparison;
   podium: RateComparison;
-  /** Null for adac_hth (no national finals). */
+  /** National-finals spots this championship awards (hmj: 13, ADAC: 1 per class 1–5); null when none. */
   dkm: (RateComparison & { spotsTotal: number }) | null;
   endlaufWins: ShareFact;
   endlaufPodiums: ShareFact;
@@ -376,7 +379,7 @@ export interface SubjectFacts {
   bestClimber: { name: string; ageClass: number; delta: number; rank: number | null } | null;
   /** Subject's drivers currently leading a class. */
   leaders: { name: string; ageClass: number }[];
-  /** Subject's drivers on a DKM position (hmj). */
+  /** Subject's drivers on a DKM position awarded by this championship. */
   dkmDrivers: { name: string; ageClass: number; rank: number }[];
   /** Fastest laps of the subject (event / class / driver / seconds). */
   fastestLapList: { event: string; ageClass: number; name: string; seconds: number; withPenalty: boolean }[];
@@ -562,7 +565,7 @@ export function buildSubjectFacts(
       .filter((r) => !r.excluded && r.rank === 1)
       .map((r) => ({ name: fullName(r), ageClass: r.ageClass })),
     dkmDrivers: subjectRows
-      .filter((r) => !r.excluded && qualifiesForDkm(championship, r.ageClass, r.rank))
+      .filter((r) => !r.excluded && r.dkmVia === championship)
       .map((r) => ({ name: fullName(r), ageClass: r.ageClass, rank: r.rank as number })),
     fastestLapList,
   };

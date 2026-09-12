@@ -69,11 +69,27 @@ whole class (`DELETE /api/admin/events/[id]/runs`).
 
 ## Endläufe 2026 (hmj + ADAC Hessen-Thüringen)
 
-Separate data set under `/endlauf26/{hmj,adac-hth}`, seeded from the official
-standings PDFs (`make parse-endlauf26` → `data/endlauf26/*.json` → `make seed-endlauf26`).
-The seed imports *every* driver of the lists; only the qualified ones (green in
-the PDF) form the Endlauf field and get entries, the rest is kept as the pool of
-replacement candidates.
+Separate data set under `/endlauf26/{hmj,adac-hth}`, seeded by `make seed-endlauf26`
+(`webapp/scripts/seed-endlauf26.ts`, idempotent) from `data/endlauf26/`:
+
+- **hmj** — `hmj.json`, generated from the official standings PDF
+  (`make parse-endlauf26`). The seed imports *every* driver of the list; only
+  the qualified ones (green in the PDF) form the Endlauf field and get entries,
+  the rest is kept as the pool of replacement candidates.
+- **ADAC Hessen-Thüringen** — `adac-hth_endlauf2026.csv`, the **final start
+  list** and single source of truth for the field. Semicolon-separated, no
+  header: `Klasse;Startplatz Endlauf 1;Nachname Vorname;Platz Regionalmeisterschaft;Verein;Region;[Nachrücker]`.
+  The regional position is scored like one race via the points table (several
+  drivers may carry the same position), column 7 = `Nachrücker` flags a
+  replacement driver (badge *Nachrücker*, scored like everybody else), column 2
+  becomes the live start order of all three Endläufe (for classes without live
+  times). Club spellings are normalised to the names already in the database
+  (`CLUB_ALIASES` in `lib/endlauf26/adac-field.ts`) so one club stays one team.
+  Drivers of earlier imports that are not on the list are **deleted** by the
+  seed (unless an official result exists for them — then they are kept and
+  reported), as are clubs without drivers; there is no replacement pool for
+  ADAC. `adac-hth.json` (regional standings PDFs) only enriches matching
+  drivers with Ausweis-Nr., season totals and per-race results.
 
 Field changes are managed on `/endlauf26/[champ]/admin` → **Fahrerfeld** and apply
 to all Endläufe of the championship (announce them before the first Endlauf):
@@ -144,10 +160,23 @@ API key a rule-based sentence is shown instead.
 
 ### National finals (DKM)
 
-In the hmj tables the positions that qualify for the *Deutsche Kartslalom
-Meisterschaft der dmsj* carry a small German flag (Klasse 1: 1–2, Klasse 2–4:
-1–3, Klasse 5: 1–2; `HMJ_DKM_SPOTS` in `lib/endlauf26/ranking.ts`). ADAC has
-no national final.
+Positions that qualify for the *Deutsche Kartslalom Meisterschaft der dmsj*
+carry a small German flag (`assignDkmSpots` in `lib/endlauf26/ranking.ts`,
+`row.dkmVia`):
+
+- **hmj**: Klasse 1: 1–2, Klasse 2–4: 1–3, Klasse 5: 1–2 (`HMJ_DKM_SPOTS`).
+- **ADAC**: the Endläufe award the *last* spot per class 1–5
+  (`ADAC_DKM_SPOTS`). It goes to the class winner — unless the winner is already
+  qualified through the hmj standings (as computed from the hmj Endlauf
+  results in the database), then to the runner-up, and so on. Drivers already
+  qualified via hmj carry a grey *🇩🇪 hmj* badge next to their name and do not
+  consume the ADAC spot; the driver who currently gets it has the flag on the
+  rank. Matching between the two championships is by name (tolerant of
+  spelling differences, `lib/endlauf26/names.ts`) and age class.
+- Klasse 6 has no national final in either championship.
+
+The teams page counts only spots awarded by the championship shown (ADAC:
+hmj-qualified drivers are not counted).
 
 ### Vereine & Regionen (teams page)
 
@@ -175,12 +204,15 @@ no national final.
   without an API key. Clicking a quote copies it; admins get a **Neu** button
   to re-phrase (`GET /api/endlauf26/quotes/[champ]?subject=team|region&refresh=1`).
 
-### Source PDFs
+### Source documents
 
-The standings PDFs the field was derived from are stored in the database
-(`make seed-endlauf26` fills empty slots from `data/endlauf26/source/`; admins
-can replace them under **Quell-PDFs** on `/endlauf26/[champ]/admin`) and are
-linked on the championship page (`/api/endlauf26/documents/[id]`).
+The lists the field was derived from are stored in the database (`make
+seed-endlauf26` fills empty slots from `data/endlauf26/`: the hmj standings
+PDF, the ADAC start-list CSV and the three regional standings PDFs; admins can
+replace them under **Quelldokumente** on `/endlauf26/[champ]/admin`) and are
+linked on the championship page (`/api/endlauf26/documents/[id]`). Replacing
+the CSV document does *not* change the field — edit
+`data/endlauf26/adac-hth_endlauf2026.csv` and re-run the seed for that.
 
 ### Live timing (tool only)
 

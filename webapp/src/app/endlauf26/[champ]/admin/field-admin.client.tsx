@@ -87,6 +87,15 @@ export function FieldAdmin({
             <strong>Nachnominierte</strong> Fahrer aus der Restliste zählen wie Qualifizierte
             und starten in noch nicht begonnenen Klassen als Erste (Startreihenfolge von unten
             nach oben).
+            {championship === "adac_hth" && (
+              <>
+                {" "}
+                ADAC: Das Feld ist die finale Startliste (<code>adac-hth_endlauf2026.csv</code>,
+                inkl. Nachrücker und Startplätzen für Endlauf 1) — es gibt keine Restliste;
+                Änderungen an der CSV werden mit <code>make server-db-seed-endlauf26</code>{" "}
+                übernommen.
+              </>
+            )}
           </p>
         </div>
       </div>

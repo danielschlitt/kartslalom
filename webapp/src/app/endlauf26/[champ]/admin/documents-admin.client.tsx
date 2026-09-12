@@ -17,6 +17,7 @@ const ERROR_TEXT: Record<string, string> = {
   unauthorized: "Nicht als Admin freigeschaltet — Seite neu laden und Admin-Token eingeben.",
   file_too_large: "Datei ist zu groß (max. 25 MB).",
   not_a_pdf: "Nur PDF-Dateien.",
+  not_a_csv: "Nur CSV-Dateien.",
   missing_file: "Keine Datei ausgewählt.",
 };
 
@@ -44,11 +45,12 @@ export function DocumentsAdmin({
     <section id="dokumente" className="space-y-3">
       <div>
         <h2 className="text-sm font-semibold tracking-wider text-[var(--color-muted)] uppercase">
-          Quell-PDFs
+          Quelldokumente
         </h2>
         <p className="mt-1 text-xs text-[var(--color-muted)]">
-          Die offiziellen Zwischenstands-Listen, aus denen das Fahrerfeld stammt (grün markiert =
-          qualifiziert). Werden hier gespeichert und sind für alle auf der Wertungsseite anklickbar.
+          Die offiziellen Listen, aus denen das Fahrerfeld stammt (hmj: Zwischenstand, grün markiert =
+          qualifiziert; ADAC: die finale Startliste als CSV plus die Zwischenstände der Regionen).
+          Werden hier gespeichert und sind für alle auf der Wertungsseite anklickbar.
         </p>
       </div>
       {error && (
@@ -87,6 +89,7 @@ function DocumentSlotCard({
 }) {
   const [busy, setBusy] = useState(false);
   const inputRef = useRef<HTMLInputElement>(null);
+  const isCsv = slot.mime === "text/csv";
 
   const upload = async (file: File | undefined) => {
     if (!file) return;
@@ -149,7 +152,7 @@ function DocumentSlotCard({
         <input
           ref={inputRef}
           type="file"
-          accept="application/pdf,.pdf"
+          accept={isCsv ? "text/csv,.csv" : "application/pdf,.pdf"}
           className="hidden"
           disabled={busy}
           onChange={(ev) => void upload(ev.target.files?.[0])}
@@ -164,7 +167,7 @@ function DocumentSlotCard({
           )}
         >
           {busy ? <RefreshCw className="h-3.5 w-3.5 animate-spin" /> : <Upload className="h-3.5 w-3.5" />}
-          {doc ? "Ersetzen" : "PDF hochladen"}
+          {doc ? "Ersetzen" : isCsv ? "CSV hochladen" : "PDF hochladen"}
         </button>
         {doc && (
           <button

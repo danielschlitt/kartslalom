@@ -24,6 +24,7 @@ import {
   type EndlaufEventInfo,
   type EndlaufRankable,
 } from "@/lib/endlauf26/ranking";
+import { namesMatch, nameTokens } from "@/lib/endlauf26/names";
 import type {
   EndlaufResultImageMeta,
   EndlaufResultImportItem,
@@ -652,12 +653,31 @@ export interface EndlaufChampionshipData {
   scored: Map<number, Set<number>>;
 }
 
+/**
+ * hmj drivers who hold a DKM spot in the current (official) hmj standings —
+ * as a predicate on ADAC rows. Matching is by name (tolerant) and age class,
+ * because the two championships share drivers by name only.
+ */
+async function hmjDkmQualifiedPredicate(): Promise<(row: Endlauf26Row) => boolean> {
+  const hmj = await getEndlaufChampionship("hmj");
+  const qualified = hmj.rows
+    .filter((r) => r.dkmVia === "hmj")
+    .map((r) => ({ ageClass: r.ageClass, tokens: nameTokens(r.lastName, r.firstName) }));
+  return (row) => {
+    const tokens = nameTokens(row.lastName, row.firstName);
+    return qualified.some((q) => q.ageClass === row.ageClass && namesMatch(tokens, q.tokens));
+  };
+}
+
 export async function getEndlaufChampionship(
   championship: Endlauf26Championship,
   opts: { applyDrops?: boolean } = {},
 ): Promise<EndlaufChampionshipData> {
   const events = await getEndlaufEvents(championship);
   const eventIds = events.map((e) => e.id);
+  // The ADAC DKM spot skips drivers already qualified through hmj.
+  const qualifiedElsewhere =
+    championship === "adac_hth" ? await hmjDkmQualifiedPredicate() : undefined;
 
   const driverRows = await db
     .select({
@@ -759,7 +779,7 @@ export async function getEndlaufChampionship(
     championship,
     drivers,
     events.map(toEventInfo),
-    { applyDrops: opts.applyDrops },
+    { applyDrops: opts.applyDrops, qualifiedElsewhere },
   );
 
   return { championship, events, drivers, rows, scored };

@@ -1,6 +1,6 @@
 import {
+  DKM_NAME,
   dkmSpots,
-  qualifiesForDkm,
   type Endlauf26Championship,
   type Endlauf26Row,
   type EndlaufEventInfo,
@@ -42,6 +42,10 @@ export function EndlaufChampionshipTable({
   const groupLabel = championship === "hmj" ? "Verband" : "Region";
   const ageClass = rows[0]?.ageClass ?? null;
   const spots = ageClass === null ? 0 : dkmSpots(championship, ageClass);
+  const spotsTitle =
+    championship === "hmj"
+      ? `Startplätze bei der ${DKM_NAME}`
+      : `Startplatz bei der ${DKM_NAME} über die ADAC-Endläufe – geht an den bestplatzierten Fahrer, der nicht schon über die hmj qualifiziert ist`;
 
   return (
     <div className="rounded-lg border border-[var(--color-border)] bg-[var(--color-surface)]">
@@ -51,8 +55,8 @@ export function EndlaufChampionshipTable({
         </h3>
         <span className="flex items-center gap-3 text-xs text-[var(--color-muted)]">
           {spots > 0 && (
-            <span className="inline-flex items-center gap-1" title="Startplätze bei der Deutschen Kartslalom Meisterschaft der dmsj">
-              <GermanFlag /> {spots} DKM-Plätze
+            <span className="inline-flex items-center gap-1" title={spotsTitle}>
+              <GermanFlag title={spotsTitle} /> {spots} {spots === 1 ? "DKM-Platz" : "DKM-Plätze"}
             </span>
           )}
           <span>{rows.length} Fahrer</span>
@@ -129,7 +133,12 @@ export function EndlaufChampionshipTable({
                       shared={r.sharedRank}
                       excluded={r.excluded}
                       isHome={isHome}
-                      dkm={!r.excluded && qualifiesForDkm(championship, r.ageClass, r.rank)}
+                      dkm={r.dkmVia === championship}
+                      dkmTitle={
+                        championship === "hmj"
+                          ? `Qualifiziert für die ${DKM_NAME}`
+                          : `Startplatz für die ${DKM_NAME} über die ADAC-Endläufe (bestplatzierter noch nicht qualifizierter Fahrer der Klasse)`
+                      }
                     />
                   </td>
                   <td
@@ -167,9 +176,21 @@ export function EndlaufChampionshipTable({
                     {r.nominated && (
                       <span
                         className="ml-2 rounded-sm bg-[var(--color-accent)]/15 px-1 py-0.5 text-[10px] font-semibold text-[var(--color-accent)] uppercase"
-                        title="Nachrücker — war in der Liste nicht grün markiert, startet aber bei den Endläufen"
+                        title={
+                          championship === "hmj"
+                            ? "Nachrücker — war in der Liste nicht grün markiert, startet aber bei den Endläufen"
+                            : "Nachrücker — laut Startliste für einen frei gewordenen Platz nachgerückt"
+                        }
                       >
                         Nachrücker
+                      </span>
+                    )}
+                    {championship !== "hmj" && r.dkmVia === "hmj" && (
+                      <span
+                        className="ml-2 inline-flex items-center gap-1 rounded-sm bg-[var(--color-surface-2)] px-1 py-0.5 text-[10px] font-semibold text-[var(--color-muted)] uppercase"
+                        title={`Bereits über die hmj-Wertung für die ${DKM_NAME} qualifiziert — der ADAC-Startplatz geht an den nächsten Fahrer`}
+                      >
+                        <GermanFlag className="h-2 w-3" title="" /> hmj
                       </span>
                     )}
                   </td>
@@ -208,6 +229,7 @@ function RankCell({
   excluded,
   isHome,
   dkm = false,
+  dkmTitle,
 }: {
   rank: number | null;
   shared: boolean;
@@ -215,6 +237,7 @@ function RankCell({
   isHome: boolean;
   /** Position qualifies for the national finals (DKM der dmsj) → small German flag. */
   dkm?: boolean;
+  dkmTitle?: string;
 }) {
   if (excluded || rank === null) {
     return (
@@ -238,7 +261,10 @@ function RankCell({
     >
       {rank}.
       {dkm && (
-        <GermanFlag className="absolute -top-1 -right-1.5 h-2 w-3 shadow-[0_0_0_1px_var(--color-surface)]" />
+        <GermanFlag
+          className="absolute -top-1 -right-1.5 h-2 w-3 shadow-[0_0_0_1px_var(--color-surface)]"
+          title={dkmTitle}
+        />
       )}
     </span>
   );

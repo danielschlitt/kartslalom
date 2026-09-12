@@ -79,6 +79,7 @@ server-db-seed: check-deploy-vars
 		docker compose -f $(SERVER_DOCKER_COMPOSE) --env-file $(SERVER_ENV_FILE) exec -T webapp npm run db:seed"
 
 # Endläufe 2026: seed the separate hmj / ADAC Hessen-Thüringen data set (idempotent).
+# ADAC field = data/endlauf26/adac-hth_endlauf2026.csv (ships with the image → run `make deploy` first).
 server-db-seed-endlauf26: check-deploy-vars
 	ssh $(SERVER_USER)@$(SERVER_HOST) "\
 		cd $(SERVER_PROJECT_PATH) && \
@@ -114,11 +115,12 @@ push-db:
 seed-db:
 	cd webapp && npm run db:seed
 
-# Endläufe 2026 (hmj + ADAC Hessen-Thüringen) from data/endlauf26/*.json
+# Endläufe 2026: hmj from data/endlauf26/hmj.json, ADAC field from data/endlauf26/adac-hth_endlauf2026.csv
 seed-endlauf26:
 	cd webapp && npm run db:seed-endlauf26
 
-# Regenerate data/endlauf26/*.json from the official PDFs in data/endlauf26/source/.
+# Regenerate data/endlauf26/*.json from the official PDFs in data/endlauf26/source/
+# (hmj.json = hmj field; adac-hth.json only enriches the CSV field with Ausweis-Nr./season results).
 # Needs python3 with pdfplumber: python3 -m venv .venv && .venv/bin/pip install pdfplumber
 PDFPY ?= python3
 parse-endlauf26:

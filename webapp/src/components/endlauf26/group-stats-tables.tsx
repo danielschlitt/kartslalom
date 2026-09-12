@@ -80,7 +80,11 @@ export function GroupPointsTable({
   highlightName: string;
   countLabel: string;
 }) {
-  const showDkm = championship === "hmj";
+  // Both championships award DKM spots (hmj: top ranks; ADAC: one per class 1–5).
+  const dkmTitle =
+    championship === "hmj"
+      ? "Fahrer auf einem Startplatz für die Deutsche Kartslalom Meisterschaft der dmsj"
+      : "Fahrer, die aktuell den ADAC-Startplatz ihrer Klasse für die Deutsche Kartslalom Meisterschaft der dmsj holen (bereits über die hmj qualifizierte Fahrer zählen nicht)";
   return (
     <Card title={title} count={rows.length} countLabel={countLabel}>
       <table className="w-full text-sm">
@@ -96,12 +100,10 @@ export function GroupPointsTable({
             <th className={num} title="Fahrer auf Platz 1–3 ihrer Klasse (Meisterschaftsstand)">
               Top 3
             </th>
-            {showDkm && (
-              <th className={num} title="Fahrer auf einem Startplatz für die Deutsche Kartslalom Meisterschaft der dmsj">
-                <GermanFlag className="mr-1" />
-                DKM
-              </th>
-            )}
+            <th className={num} title={dkmTitle}>
+              <GermanFlag className="mr-1" title={dkmTitle} />
+              DKM
+            </th>
             <th className={num} title="Endlauf-Siege">
               Siege
             </th>
@@ -132,7 +134,7 @@ export function GroupPointsTable({
                 <td className={num}>{s.driverCount}</td>
                 <td className={num}>{s.classLeaders || "—"}</td>
                 <td className={num}>{s.podiumPlaces || "—"}</td>
-                {showDkm && <td className={num}>{s.dkmQualifiers || "—"}</td>}
+                <td className={num}>{s.dkmQualifiers || "—"}</td>
                 <td className={num}>{s.endlaufWins || "—"}</td>
                 <td className={num}>{s.endlaufPodiums || "—"}</td>
                 <td className={num} title="ohne / mit Strafsekunden">

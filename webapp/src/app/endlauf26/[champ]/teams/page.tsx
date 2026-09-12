@@ -29,8 +29,9 @@ export const dynamic = "force-dynamic";
  * Two variants of every points table: with the official scoring (hmj: the
  * worst of 7 results is a Streichresultat) and — `?drops=off` — with every
  * race counted. The movement tables (places gained / lost through the
- * Endläufe), the fastest laps and the social-media quotes follow the same
- * switch; the quotes always use the official scoring.
+ * Endläufe) follow the same switch. The Endlauf-points table ("gezählt" vs
+ * "alle"), the fastest laps and the social-media quotes always use the
+ * official scoring — they would be meaningless or identical otherwise.
  */
 export default async function EndlaufTeamsPage({
   params,
@@ -48,8 +49,11 @@ export default async function EndlaufTeamsPage({
   const hasDrops = championship === "hmj";
   const applyDrops = !hasDrops || sp.drops !== "off";
 
-  const [data, results, liveEvent, isAdmin] = await Promise.all([
+  const [data, officialData, results, liveEvent, isAdmin] = await Promise.all([
     getEndlaufChampionship(championship, { applyDrops }),
+    // The Endlauf-points table compares "gezählt" vs "alle" itself and must
+    // not follow the toggle — with drops off both columns would be identical.
+    applyDrops ? null : getEndlaufChampionship(championship, { applyDrops: true }),
     getEndlaufResultsForChampionship(championship),
     getLiveEndlaufEvent(championship),
     isAdminSession(),
@@ -61,6 +65,13 @@ export default async function EndlaufTeamsPage({
   const teamsByAvg = [...teams].sort((a, b) => b.avgPoints - a.avgPoints || a.name.localeCompare(b.name, "de"));
   const regions = computeGroupStats(championship, "region", data.rows, events, results);
   const regionsByAvg = [...regions].sort((a, b) => b.avgPoints - a.avgPoints || a.name.localeCompare(b.name, "de"));
+  // Always the official scoring (Streichresultat applied), whatever the toggle says.
+  const teamsOfficial = officialData
+    ? computeGroupStats(championship, "team", officialData.rows, events, results)
+    : teams;
+  const regionsOfficial = officialData
+    ? computeGroupStats(championship, "region", officialData.rows, events, results)
+    : regions;
   const regionWord = regionLabel(championship);
   const regionCountLabel = championship === "hmj" ? "Verbände" : "Regionen";
 
@@ -106,18 +117,17 @@ export default async function EndlaufTeamsPage({
 
       <p className="text-xs text-[var(--color-muted)]">
         Punkte = Summe der Meisterschaftspunkte aller Fahrer (inkl. Endlauf-Faktoren
-        {hasDrops && applyDrops ? " und Streichresultaten" : ""}). Führende / Top 3
-        {championship === "hmj" && (
-          <>
-            {" "}/ <GermanFlag className="mx-0.5" /> DKM
-          </>
-        )}{" "}
-        = Fahrer, die in der aktuellen Wertung auf Platz 1 / 1–3
-        {championship === "hmj" ? ` / einem Startplatz für die ${DKM_NAME}` : ""} ihrer Klasse stehen. Siege /
+        {hasDrops && applyDrops ? " und Streichresultaten" : ""}). Führende / Top 3 /{" "}
+        <GermanFlag className="mx-0.5" /> DKM = Fahrer, die in der aktuellen Wertung auf Platz 1 / 1–3 / einem
+        Startplatz für die {DKM_NAME}
+        {championship === "hmj"
+          ? ""
+          : " (der ADAC-Platz je Klasse geht an den bestplatzierten Fahrer, der nicht schon über die hmj qualifiziert ist)"}{" "}
+        ihrer Klasse stehen. Siege /
         Podien = Ergebnisse in den Endläufen. Schn. Rd. = schnellste Einzelrunde je Klasse und Endlauf (ohne /
         mit Strafsekunden).
         {hasDrops &&
-          " Endlauf-Punkte = nur die Punkte aus Langgöns 1 & 2 (×1,25) pro Fahrer – „gezählt“ ohne Streichresultate, „alle“ mit jedem Endlauf-Ergebnis."}{" "}
+          " Endlauf-Punkte = nur die Punkte aus Langgöns 1 & 2 (×1,25) pro Fahrer – „gezählt“ ohne Streichresultate, „alle“ mit jedem Endlauf-Ergebnis; diese Tabelle zeigt immer die offizielle Wertung, unabhängig vom Schalter oben."}{" "}
         Saldo = Veränderung der Meisterschaftsplätze durch die Endläufe, summiert über alle
         Fahrer; pro Fahrer = Saldo geteilt durch die Fahrer mit gewertetem Endlauf.
       </p>
@@ -146,7 +156,7 @@ export default async function EndlaufTeamsPage({
         {hasDrops && (
           <GroupEndlaufPointsTable
             title="Endlauf-Punkte pro Fahrer (Ø) – nur Langgöns"
-            rows={teams}
+            rows={teamsOfficial}
             highlightName={HOME_TEAM}
             countLabel="Vereine"
           />
@@ -184,7 +194,7 @@ export default async function EndlaufTeamsPage({
         {hasDrops && (
           <GroupEndlaufPointsTable
             title="Endlauf-Punkte pro Fahrer (Ø) – nur Langgöns"
-            rows={regions}
+            rows={regionsOfficial}
             highlightName={HOME_REGION}
             countLabel={regionCountLabel}
           />

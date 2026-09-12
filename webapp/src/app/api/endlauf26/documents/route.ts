@@ -1,7 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { isAdminSession, unauthorizedResponse } from "@/lib/admin-auth";
 import { upsertDocument } from "@/lib/dal/endlauf26";
-import { DOCUMENT_MAX_BYTES, documentSlot } from "@/lib/endlauf26/documents";
+import { DOCUMENT_MAX_BYTES, documentSlot, fileFitsSlot } from "@/lib/endlauf26/documents";
 import { championshipFromSlug } from "@/lib/endlauf26/ranking";
 
 export const runtime = "nodejs";
@@ -31,14 +31,18 @@ export async function POST(req: NextRequest) {
   if (file.size > DOCUMENT_MAX_BYTES) {
     return NextResponse.json({ error: "file_too_large" }, { status: 413 });
   }
-  const isPdf = file.type === "application/pdf" || /\.pdf$/i.test(file.name);
-  if (!isPdf) return NextResponse.json({ error: "not_a_pdf" }, { status: 400 });
+  if (!fileFitsSlot(slot, file)) {
+    return NextResponse.json(
+      { error: slot.mime === "text/csv" ? "not_a_csv" : "not_a_pdf" },
+      { status: 400 },
+    );
+  }
 
   const id = await upsertDocument({
     championship,
     key,
-    filename: file.name.slice(0, 200) || `${key}.pdf`,
-    mime: "application/pdf",
+    filename: file.name.slice(0, 200) || `${key}.${slot.mime === "text/csv" ? "csv" : "pdf"}`,
+    mime: slot.mime,
     data: Buffer.from(await file.arrayBuffer()),
   });
   return NextResponse.json({ ok: true, id });
