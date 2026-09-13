@@ -14,7 +14,7 @@
  */
 
 import { and, eq, inArray, isNotNull, or } from "drizzle-orm";
-import { endlauf26Drivers, endlauf26Entries, endlauf26StartLists } from "@/db/schema";
+import { endlauf26Drivers, endlauf26Entries, endlauf26StartLists } from "../../db/schema";
 import {
   inFieldCondition,
   loadEndlaufChampionship,

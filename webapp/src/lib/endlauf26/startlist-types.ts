@@ -5,7 +5,7 @@
  * file free of server-only code.
  */
 
-import type { MatchKind } from "@/lib/ocr/match-entries";
+import type { MatchKind } from "../ocr/match-entries";
 
 /** One driver row as printed on the start list. */
 export interface StartListSheetRow {

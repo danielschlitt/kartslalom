@@ -9,14 +9,14 @@
 
 import { and, asc, eq, inArray, or } from "drizzle-orm";
 import type { NodePgDatabase } from "drizzle-orm/node-postgres";
-import type * as schema from "@/db/schema";
+import type * as schema from "../../db/schema";
 import {
   endlauf26Drivers,
   endlauf26Events,
   endlauf26Results,
   endlauf26SeasonResults,
   endlauf26Teams,
-} from "@/db/schema";
+} from "../../db/schema";
 import {
   computeEndlauf26Championship,
   pointsForPlace,
