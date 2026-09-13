@@ -1,5 +1,5 @@
 import "server-only";
-import { and, asc, desc, eq, inArray, isNotNull, or, sql } from "drizzle-orm";
+import { and, asc, desc, eq, inArray, sql } from "drizzle-orm";
 import { db } from "@/db/drizzle";
 import {
   endlauf26Documents,
@@ -10,68 +10,49 @@ import {
   endlauf26Quotes,
   endlauf26ResultImages,
   endlauf26Results,
-  endlauf26SeasonResults,
+  endlauf26StartLists,
   endlauf26Teams,
 } from "@/db/schema";
 import {
-  computeEndlauf26Championship,
-  pointsForPlace,
   rankEndlaufEntries,
   type Endlauf26Championship,
-  type Endlauf26Row,
-  type EndlaufDriverInput,
   type EndlaufEntryRuns,
-  type EndlaufEventInfo,
   type EndlaufRankable,
 } from "@/lib/endlauf26/ranking";
-import { namesMatch, nameTokens } from "@/lib/endlauf26/names";
+import {
+  inFieldCondition,
+  loadEndlaufChampionship,
+  loadEndlaufEvents,
+  mapEvent,
+  num,
+  type EndlaufChampionshipData,
+  type EndlaufEvent,
+} from "@/lib/endlauf26/championship-data";
+import {
+  entryHasAnyTime,
+  syncStandingsStartOrders as syncStandingsStartOrdersWith,
+  type StartOrderSyncOptions,
+  type StartOrderSyncSummary,
+} from "@/lib/endlauf26/start-order-sync";
 import type {
   EndlaufResultImageMeta,
   EndlaufResultImportItem,
   EndlaufResultRow,
   PoolDriver,
 } from "@/lib/endlauf26/results-types";
+import type { EndlaufStartListMeta, StartListImportItem } from "@/lib/endlauf26/startlist-types";
 
-export type EndlaufEventStatus = "upcoming" | "live" | "completed";
-
-export interface EndlaufEvent {
-  id: number;
-  championship: Endlauf26Championship;
-  number: number;
-  slug: string;
-  name: string;
-  eventDate: string | null;
-  factor: number;
-  status: EndlaufEventStatus;
-  liveAgeClass: number | null;
-  liveEntryId: number | null;
-}
-
-function mapEvent(e: typeof endlauf26Events.$inferSelect): EndlaufEvent {
-  return {
-    id: e.id,
-    championship: e.championship,
-    number: e.number,
-    slug: e.slug,
-    name: e.name,
-    eventDate: e.eventDate,
-    factor: Number(e.factor),
-    status: e.status,
-    liveAgeClass: e.liveAgeClass,
-    liveEntryId: e.liveEntryId,
-  };
-}
+export type {
+  EndlaufChampionshipData,
+  EndlaufEvent,
+  EndlaufEventStatus,
+} from "@/lib/endlauf26/championship-data";
+export { toEventInfo } from "@/lib/endlauf26/championship-data";
 
 export async function getEndlaufEvents(
   championship?: Endlauf26Championship,
 ): Promise<EndlaufEvent[]> {
-  const q = db.select().from(endlauf26Events);
-  const rows = championship
-    ? await q
-        .where(eq(endlauf26Events.championship, championship))
-        .orderBy(asc(endlauf26Events.number))
-    : await q.orderBy(asc(endlauf26Events.championship), asc(endlauf26Events.number));
-  return rows.map(mapEvent);
+  return loadEndlaufEvents(db, championship);
 }
 
 export async function getEndlaufEvent(eventId: number): Promise<EndlaufEvent | null> {
@@ -117,32 +98,6 @@ export async function getLiveEndlaufEvent(
     )
     .limit(1);
   return rows[0] ? mapEvent(rows[0]) : null;
-}
-
-export function toEventInfo(e: EndlaufEvent): EndlaufEventInfo {
-  return {
-    eventId: e.id,
-    number: e.number,
-    slug: e.slug,
-    name: e.name,
-    factor: e.factor,
-  };
-}
-
-/* ───────────────────────────── field ───────────────────────────── */
-
-/**
- * The Endlauf field: drivers qualified via the standings list plus
- * Nachrücker (nominated). Everything else in `endlauf26_drivers` is a
- * replacement candidate and must not show up anywhere public.
- */
-const inFieldCondition = or(
-  eq(endlauf26Drivers.qualified, true),
-  eq(endlauf26Drivers.nominated, true),
-);
-
-function num(v: string | null): number | null {
-  return v === null ? null : Number(v);
 }
 
 /* ───────────────────────── live timing entries ───────────────────────── */
@@ -413,23 +368,25 @@ export async function deleteResultImage(id: number): Promise<boolean> {
 }
 
 /** Remove the whole imported result list of one class (rows + photos). */
-export async function deleteClassResults(eventId: number, ageClass: number) {
-  return db.transaction(async (tx) => {
+export async function deleteClassResults(event: EndlaufEvent, ageClass: number) {
+  const deleted = await db.transaction(async (tx) => {
     const rows = await tx
       .delete(endlauf26Results)
-      .where(and(eq(endlauf26Results.eventId, eventId), eq(endlauf26Results.ageClass, ageClass)))
+      .where(and(eq(endlauf26Results.eventId, event.id), eq(endlauf26Results.ageClass, ageClass)))
       .returning({ id: endlauf26Results.id });
     const imgs = await tx
       .delete(endlauf26ResultImages)
       .where(
         and(
-          eq(endlauf26ResultImages.eventId, eventId),
+          eq(endlauf26ResultImages.eventId, event.id),
           eq(endlauf26ResultImages.ageClass, ageClass),
         ),
       )
       .returning({ id: endlauf26ResultImages.id });
     return { rows: rows.length, images: imgs.length };
   });
+  await syncStandingsStartOrders(event.championship);
+  return deleted;
 }
 
 /**
@@ -592,13 +549,16 @@ export async function importEndlaufResults(
   for (const it of items) {
     const d = byId.get(it.driverId)!;
     if (!d.qualified && !d.nominated) {
-      await setEndlaufDriverNominated(d.id, true);
+      await setEndlaufDriverNominated(d.id, true, { skipSync: true });
       outcome.nominated.push(`${d.lastName} ${d.firstName}`);
     } else if (d.withdrawn) {
-      await setEndlaufDriverWithdrawn(d.id, false);
+      await setEndlaufDriverWithdrawn(d.id, false, { skipSync: true });
       outcome.reactivated.push(`${d.lastName} ${d.firstName}`);
     }
   }
+
+  // The standing changed → the default start orders of the later Endläufe follow.
+  await syncStandingsStartOrders(event.championship);
 
   return { ok: true, outcome };
 }
@@ -608,8 +568,9 @@ export async function importEndlaufResults(
  * deleted, live times are cleared, the live state is reset. Drivers, the
  * field (Nachrücker/Abmeldungen) and start orders are kept.
  */
-export async function resetEndlaufEvent(eventId: number) {
-  return db.transaction(async (tx) => {
+export async function resetEndlaufEvent(event: EndlaufEvent) {
+  const eventId = event.id;
+  const reset = await db.transaction(async (tx) => {
     const results = await tx
       .delete(endlauf26Results)
       .where(eq(endlauf26Results.eventId, eventId))
@@ -640,149 +601,190 @@ export async function resetEndlaufEvent(eventId: number) {
       .where(eq(endlauf26Events.id, eventId));
     return { results: results.length, images: images.length, entries: entries.length };
   });
+  await syncStandingsStartOrders(event.championship);
+  return reset;
 }
 
 /* ─────────────────────────── championship ─────────────────────────── */
-
-export interface EndlaufChampionshipData {
-  championship: Endlauf26Championship;
-  events: EndlaufEvent[];
-  drivers: EndlaufDriverInput[];
-  rows: Endlauf26Row[];
-  /** eventId → set of age classes with an imported result list */
-  scored: Map<number, Set<number>>;
-}
-
-/**
- * hmj drivers who hold a DKM spot in the current (official) hmj standings —
- * as a predicate on ADAC rows. Matching is by name (tolerant) and age class,
- * because the two championships share drivers by name only.
- */
-async function hmjDkmQualifiedPredicate(): Promise<(row: Endlauf26Row) => boolean> {
-  const hmj = await getEndlaufChampionship("hmj");
-  const qualified = hmj.rows
-    .filter((r) => r.dkmVia === "hmj")
-    .map((r) => ({ ageClass: r.ageClass, tokens: nameTokens(r.lastName, r.firstName) }));
-  return (row) => {
-    const tokens = nameTokens(row.lastName, row.firstName);
-    return qualified.some((q) => q.ageClass === row.ageClass && namesMatch(tokens, q.tokens));
-  };
-}
 
 export async function getEndlaufChampionship(
   championship: Endlauf26Championship,
   opts: { applyDrops?: boolean } = {},
 ): Promise<EndlaufChampionshipData> {
-  const events = await getEndlaufEvents(championship);
-  const eventIds = events.map((e) => e.id);
-  // The ADAC DKM spot skips drivers already qualified through hmj.
-  const qualifiedElsewhere =
-    championship === "adac_hth" ? await hmjDkmQualifiedPredicate() : undefined;
+  return loadEndlaufChampionship(db, championship, opts);
+}
 
-  const driverRows = await db
+/* ─────────────────────────── start orders ─────────────────────────── */
+
+/**
+ * Re-derive the default start orders (championship standing before the
+ * event, bottom-up) — see `lib/endlauf26/start-order-sync.ts` for what is
+ * left alone (scored classes, classes with a start list photo, classes
+ * underway unless forced).
+ */
+export async function syncStandingsStartOrders(
+  championship: Endlauf26Championship,
+  opts: StartOrderSyncOptions = {},
+): Promise<StartOrderSyncSummary> {
+  return syncStandingsStartOrdersWith(db, championship, opts);
+}
+
+export async function getStartLists(
+  eventId: number,
+  ageClass?: number,
+): Promise<EndlaufStartListMeta[]> {
+  const rows = await db
     .select({
-      d: endlauf26Drivers,
-      teamName: endlauf26Teams.name,
+      id: endlauf26StartLists.id,
+      eventId: endlauf26StartLists.eventId,
+      ageClass: endlauf26StartLists.ageClass,
+      mime: endlauf26StartLists.mime,
+      size: endlauf26StartLists.size,
+      rowCount: endlauf26StartLists.rowCount,
+      model: endlauf26StartLists.model,
+      uploadedAt: endlauf26StartLists.uploadedAt,
     })
-    .from(endlauf26Drivers)
-    .innerJoin(endlauf26Teams, eq(endlauf26Teams.id, endlauf26Drivers.teamId))
-    .where(and(eq(endlauf26Drivers.championship, championship), inFieldCondition))
-    .orderBy(asc(endlauf26Drivers.ageClass), asc(endlauf26Drivers.lastName));
+    .from(endlauf26StartLists)
+    .where(
+      and(
+        eq(endlauf26StartLists.eventId, eventId),
+        ageClass === undefined ? undefined : eq(endlauf26StartLists.ageClass, ageClass),
+      ),
+    )
+    .orderBy(asc(endlauf26StartLists.ageClass), asc(endlauf26StartLists.uploadedAt));
+  return rows.map((r) => ({ ...r, uploadedAt: r.uploadedAt.toISOString() }));
+}
 
-  const driverIds = driverRows.map((r) => r.d.id);
-  if (driverIds.length === 0) {
-    return { championship, events, drivers: [], rows: [], scored: new Map() };
+export async function getStartList(id: number) {
+  const [row] = await db
+    .select()
+    .from(endlauf26StartLists)
+    .where(eq(endlauf26StartLists.id, id))
+    .limit(1);
+  return row ?? null;
+}
+
+export interface StartListImportOutcome {
+  /** Entries whose starting order was set. */
+  written: number;
+  imageId: number;
+  /** Drivers that were not in the field and are now Nachrücker. */
+  nominated: string[];
+  /** Withdrawn drivers that appeared on the list and were re-activated. */
+  reactivated: string[];
+}
+
+/**
+ * Apply a reviewed start list photo: the photo is stored, the listed drivers
+ * get their printed Startplatz as live start order (rows of other drivers
+ * stay — a class may span two photos), drivers outside the field become
+ * Nachrücker and withdrawn drivers on the list are re-activated. From now on
+ * the standings-based default order is no longer applied to this class.
+ */
+export async function importStartList(
+  event: EndlaufEvent,
+  ageClass: number,
+  items: StartListImportItem[],
+  image: { mime: string; data: Buffer },
+  model: string | null,
+): Promise<
+  { ok: true; outcome: StartListImportOutcome } | { ok: false; error: ImportError }
+> {
+  const driverIds = items.map((i) => i.driverId);
+  const drivers = driverIds.length
+    ? await db.select().from(endlauf26Drivers).where(inArray(endlauf26Drivers.id, driverIds))
+    : [];
+  const byId = new Map(drivers.map((d) => [d.id, d]));
+  for (const id of driverIds) {
+    const d = byId.get(id);
+    if (!d || d.championship !== event.championship) return { ok: false, error: "invalid_driver" };
+    if (d.ageClass !== ageClass) return { ok: false, error: "driver_wrong_class" };
   }
 
-  const [seasonRows, resultRows] = await Promise.all([
-    db
-      .select()
-      .from(endlauf26SeasonResults)
-      .where(inArray(endlauf26SeasonResults.driverId, driverIds)),
-    eventIds.length
-      ? db
-          .select({
-            eventId: endlauf26Results.eventId,
-            driverId: endlauf26Results.driverId,
-            ageClass: endlauf26Results.ageClass,
-            position: endlauf26Results.position,
-            points: endlauf26Results.points,
-          })
-          .from(endlauf26Results)
-          .where(inArray(endlauf26Results.eventId, eventIds))
-      : Promise.resolve(
-          [] as {
-            eventId: number;
-            driverId: number;
-            ageClass: number;
-            position: number | null;
-            points: number | null;
-          }[],
-        ),
-  ]);
+  const outcome: StartListImportOutcome = {
+    written: 0,
+    imageId: 0,
+    nominated: [],
+    reactivated: [],
+  };
 
-  // A class is scored at an event as soon as any result row exists for it.
-  const scored = new Map<number, Set<number>>();
-  for (const r of resultRows) {
-    const s = scored.get(r.eventId) ?? new Set<number>();
-    s.add(r.ageClass);
-    scored.set(r.eventId, s);
+  // Field changes first — they create the entries the orders are written to.
+  for (const d of drivers) {
+    if (!d.qualified && !d.nominated) {
+      await setEndlaufDriverNominated(d.id, true, { skipSync: true });
+      outcome.nominated.push(`${d.lastName} ${d.firstName}`);
+    } else if (d.withdrawn) {
+      await setEndlaufDriverWithdrawn(d.id, false, { skipSync: true });
+      outcome.reactivated.push(`${d.lastName} ${d.firstName}`);
+    }
   }
 
-  const seasonByDriver = new Map<number, typeof seasonRows>();
-  for (const s of seasonRows) {
-    seasonByDriver.set(s.driverId, [...(seasonByDriver.get(s.driverId) ?? []), s]);
-  }
-  const resultsByDriver = new Map<number, typeof resultRows>();
-  for (const r of resultRows) {
-    resultsByDriver.set(r.driverId, [...(resultsByDriver.get(r.driverId) ?? []), r]);
-  }
+  await db.transaction(async (tx) => {
+    const [img] = await tx
+      .insert(endlauf26StartLists)
+      .values({
+        eventId: event.id,
+        ageClass,
+        mime: image.mime,
+        size: image.data.byteLength,
+        data: image.data,
+        rowCount: items.length,
+        model,
+      })
+      .returning({ id: endlauf26StartLists.id });
+    outcome.imageId = img.id;
 
-  const drivers: EndlaufDriverInput[] = driverRows.map(({ d, teamName }) => ({
-    driverId: d.id,
-    firstName: d.firstName,
-    lastName: d.lastName,
-    teamId: d.teamId,
-    teamName,
-    ageClass: d.ageClass,
-    verband: d.verband,
-    region: d.region,
-    adacId: d.adacId,
-    yearOfBirth: d.yearOfBirth,
-    seasonPosition: d.seasonPosition,
-    seasonPoints: num(d.seasonPoints),
-    seasonRaces: d.seasonRaces,
-    withdrawn: d.withdrawn,
-    nominated: d.nominated,
-    seasonResults: (seasonByDriver.get(d.id) ?? [])
-      .sort((a, b) => a.raceNumber - b.raceNumber)
-      .map((s) => ({
-        raceNumber: s.raceNumber,
-        finishPosition: s.finishPosition,
-        points: s.points,
-      })),
-    endlaufResults: events.map((ev) => {
-      const r = (resultsByDriver.get(d.id) ?? []).find((x) => x.eventId === ev.id) ?? null;
-      const started = r !== null && r.position !== null;
-      return {
-        eventId: ev.id,
-        finishPosition: r?.position ?? null,
-        // Printed "ADAC Punkte" are authoritative; fall back to the scale.
-        pointsAwarded: started ? (r!.points ?? pointsForPlace(r!.position)) : 0,
-        started,
-        scored: scored.get(ev.id)?.has(d.ageClass) ?? false,
-      };
-    }),
-  }));
+    for (const it of items) {
+      const res = await tx
+        .update(endlauf26Entries)
+        .set({ startingOrder: it.startPosition })
+        .where(
+          and(
+            eq(endlauf26Entries.eventId, event.id),
+            eq(endlauf26Entries.driverId, it.driverId),
+          ),
+        )
+        .returning({ id: endlauf26Entries.id });
+      outcome.written += res.length;
+    }
+  });
 
-  const rows = computeEndlauf26Championship(
-    championship,
-    drivers,
-    events.map(toEventInfo),
-    { applyDrops: opts.applyDrops, qualifiedElsewhere },
-  );
+  // Other events may still follow the standing (a re-activated driver etc.).
+  await syncStandingsStartOrders(event.championship);
+  return { ok: true, outcome };
+}
 
-  return { championship, events, drivers, rows, scored };
+/**
+ * Remove the start list photos of one class and fall back to the default
+ * order (recomputed from the standing where that rule applies).
+ */
+export async function deleteStartLists(event: EndlaufEvent, ageClass: number) {
+  const imgs = await db
+    .delete(endlauf26StartLists)
+    .where(
+      and(eq(endlauf26StartLists.eventId, event.id), eq(endlauf26StartLists.ageClass, ageClass)),
+    )
+    .returning({ id: endlauf26StartLists.id });
+  const sync = await syncStandingsStartOrders(event.championship, {
+    eventId: event.id,
+    ageClass,
+    force: true,
+  });
+  const restored = sync.classes.find((c) => c.ageClass === ageClass);
+  return {
+    images: imgs.length,
+    restored: !!restored && restored.skipped === null,
+    changed: restored?.changed ?? 0,
+  };
+}
+
+/** Delete a single start list photo; the orders read from it stay. */
+export async function deleteStartListImage(id: number): Promise<boolean> {
+  const res = await db
+    .delete(endlauf26StartLists)
+    .where(eq(endlauf26StartLists.id, id))
+    .returning({ id: endlauf26StartLists.id });
+  return res.length > 0;
 }
 
 export async function getEndlaufDriver(driverId: number) {
@@ -816,11 +818,7 @@ export interface EndlaufFieldDriver {
   hasTimes: boolean;
 }
 
-const hasAnyTime = or(
-  isNotNull(endlauf26Entries.testTime),
-  isNotNull(endlauf26Entries.run1Time),
-  isNotNull(endlauf26Entries.run2Time),
-);
+const hasAnyTime = entryHasAnyTime;
 
 /**
  * Every imported driver of a championship — the field (qualified or
@@ -946,14 +944,21 @@ export type FieldChangeResult =
   | "already_qualified"
   | "has_times";
 
+interface FieldChangeOptions {
+  /** Caller re-derives the standings-based start orders itself. */
+  skipSync?: boolean;
+}
+
 /**
  * Flag a driver of the field as not competing (or take it back). The entries
  * stay in place — they are hidden from start lists by `withdrawn`, and the
- * remaining drivers are renumbered for classes that have not started yet.
+ * remaining drivers are renumbered for classes that have not started yet
+ * (classes following the standing are recomputed from it).
  */
 export async function setEndlaufDriverWithdrawn(
   driverId: number,
   withdrawn: boolean,
+  opts: FieldChangeOptions = {},
 ): Promise<FieldChangeResult> {
   const [d] = await db
     .select()
@@ -969,6 +974,7 @@ export async function setEndlaufDriverWithdrawn(
       .where(eq(endlauf26Drivers.id, driverId));
   }
   await compactStartingOrders(d.championship, d.ageClass);
+  if (!opts.skipSync) await syncStandingsStartOrders(d.championship);
   return "ok";
 }
 
@@ -981,6 +987,7 @@ export async function setEndlaufDriverWithdrawn(
 export async function setEndlaufDriverNominated(
   driverId: number,
   nominated: boolean,
+  opts: FieldChangeOptions = {},
 ): Promise<FieldChangeResult> {
   const [d] = await db
     .select()
@@ -1037,6 +1044,7 @@ export async function setEndlaufDriverNominated(
   }
 
   await compactStartingOrders(d.championship, d.ageClass);
+  if (!opts.skipSync) await syncStandingsStartOrders(d.championship);
   return "ok";
 }
 

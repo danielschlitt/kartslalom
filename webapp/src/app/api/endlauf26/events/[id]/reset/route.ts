@@ -27,6 +27,6 @@ export async function POST(
     return NextResponse.json({ error: "confirmation_mismatch" }, { status: 400 });
   }
 
-  const result = await resetEndlaufEvent(eventId);
+  const result = await resetEndlaufEvent(event);
   return NextResponse.json({ ok: true, ...result });
 }

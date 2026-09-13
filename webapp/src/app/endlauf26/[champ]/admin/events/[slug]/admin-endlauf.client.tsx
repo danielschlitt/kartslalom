@@ -21,8 +21,10 @@ import {
   ChevronRight,
   Eye,
   ImageIcon,
+  ListOrdered,
   Mic,
   RefreshCw,
+  RotateCcw,
   Square,
   Trash2,
   Users,
@@ -39,16 +41,25 @@ import type {
   EndlaufResultRow,
   PoolDriver,
 } from "@/lib/endlauf26/results-types";
+import {
+  duplicateStartingOrders,
+  resolveStartOrderSource,
+  START_ORDER_SOURCE_LABEL,
+} from "@/lib/endlauf26/start-order";
+import type { EndlaufStartListMeta } from "@/lib/endlauf26/startlist-types";
 import { cn, formatDateDe } from "@/lib/utils";
 import { EndlaufResultsImport } from "@/components/endlauf26/results-import.client";
+import { EndlaufStartListImport } from "@/components/endlauf26/startlist-import.client";
 
 /* ────────────────────────────── types ────────────────────────────── */
 
 export interface AdminEntry {
   entryId: number;
+  driverId: number;
   firstName: string;
   lastName: string;
   teamName: string;
+  nominated: boolean;
   startingOrder: number | null;
   runs: EndlaufEntryRuns;
   positionLive: number | null;
@@ -63,6 +74,8 @@ export interface AdminGroup {
   results: EndlaufResultRow[];
   /** Stored photos of the result list. */
   images: EndlaufResultImageMeta[];
+  /** Stored photos of the start list (Startaufstellung). */
+  startLists: EndlaufStartListMeta[];
   /** Every driver of the class (field + Nachrücker pool) for the OCR review. */
   pool: PoolDriver[];
 }
@@ -76,6 +89,13 @@ interface AdminEvent {
   status: "upcoming" | "live" | "completed";
   liveAgeClass: number | null;
   liveEntryId: number | null;
+  championship: "hmj" | "adac_hth";
+  startOrder: {
+    /** German description of the default order of this Endlauf. */
+    baseLabel: string;
+    /** Whether the default order can be (re)computed from the standing. */
+    canSync: boolean;
+  };
 }
 
 type RunType = "test" | "first" | "second";
@@ -93,6 +113,8 @@ const ERROR_TEXT: Record<string, string> = {
   no_live_age_class: "Zuerst eine Klasse aktivieren.",
   entry_not_in_live_class: "Fahrer gehört nicht zur aktiven Klasse.",
   confirmation_mismatch: "Bestätigung stimmt nicht.",
+  standings_order_not_applicable:
+    "Für diesen Endlauf gelten die Startplätze der Startliste (CSV), nicht der Meisterschaftsstand.",
   missing_api_key: "OPENAI_API_KEY fehlt — Diktat nicht verfügbar.",
   no_speech: "Keine Sprache erkannt — bitte näher ans Mikrofon und erneut diktieren.",
   upstream_error: "Transkription fehlgeschlagen (OpenAI).",
@@ -245,9 +267,404 @@ export function AdminEndlaufClient({
         )}
       </section>
 
+      <StartGridSection event={event} groups={groups} onChange={refresh} onError={showError} />
+
       <LiveToolSection event={event} groups={groups} onChange={refresh} onError={showError} />
 
       <ResetEventCard event={event} onChange={refresh} onError={showError} />
+    </div>
+  );
+}
+
+/* ─────────────────────────── start grid ─────────────────────────── */
+
+function sortByStart(entries: AdminEntry[]): AdminEntry[] {
+  return [...entries].sort((a, b) => {
+    const ao = a.startingOrder ?? Number.MAX_SAFE_INTEGER;
+    const bo = b.startingOrder ?? Number.MAX_SAFE_INTEGER;
+    if (ao !== bo) return ao - bo;
+    return a.lastName.localeCompare(b.lastName, "de");
+  });
+}
+
+function StartGridSection({
+  event,
+  groups,
+  onChange,
+  onError,
+}: {
+  event: AdminEvent;
+  groups: AdminGroup[];
+  onChange: () => void;
+  onError: (m: string) => void;
+}) {
+  const [busy, setBusy] = useState(false);
+  const openClasses = groups.filter((g) => g.results.length === 0);
+  const withStartList = openClasses.filter((g) => g.startLists.length > 0).length;
+  const underway = groups.filter((g) => countRuns(g.entries) > 0).map((g) => g.ageClass);
+
+  const syncAll = async () => {
+    const force = underway.length > 0;
+    if (
+      !confirm(
+        `Startaufstellung aller Klassen ohne Startlisten-Foto und ohne Ergebnisliste neu aus dem Meisterschaftsstand ableiten?\n\n${event.startOrder.baseLabel}.${
+          force ? `\n\nAchtung: Klassen mit Live-Zeiten (${underway.map((c) => `Klasse ${c}`).join(", ")}) werden ebenfalls neu nummeriert.` : ""
+        }`,
+      )
+    )
+      return;
+    setBusy(true);
+    try {
+      const r = await apiCall(`/api/endlauf26/events/${event.id}/start-order`, {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ force }),
+      });
+      if (!r.ok) onError(r.error);
+      onChange();
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  return (
+    <section className="space-y-3">
+      <div className="flex flex-wrap items-end justify-between gap-2">
+        <div>
+          <h2 className="text-sm font-semibold tracking-wider text-[var(--color-muted)] uppercase">
+            Startaufstellung
+          </h2>
+          <p className="mt-1 text-xs text-[var(--color-muted)]">
+            Grundlage: <strong className="text-[var(--color-foreground)]">{event.startOrder.baseLabel}</strong>.
+            {event.startOrder.canSync &&
+              " Sie folgt dem Meisterschaftsstand automatisch, sobald sich der Stand ändert (Ergebnisliste des vorigen Endlaufs eingelesen, Fahrerfeld geändert)."}{" "}
+            Vor Ort ausgehängte Startlisten (die Ergebnisliste ohne Zeiten) können pro Klasse
+            fotografiert und eingelesen werden — dann gilt die gedruckte Reihenfolge. Wird das
+            Foto gelöscht, gilt wieder die Grundlage. Einzelne Startplätze lassen sich in der
+            Tabelle von Hand ändern.
+            {withStartList > 0 && ` · ${withStartList} Klasse${withStartList === 1 ? "" : "n"} mit Startlisten-Foto.`}
+          </p>
+        </div>
+        {event.startOrder.canSync && openClasses.some((g) => g.startLists.length === 0) && (
+          <button
+            type="button"
+            onClick={syncAll}
+            disabled={busy}
+            className={cn(
+              "inline-flex items-center gap-1.5 rounded-md border border-[var(--color-border)] bg-[var(--color-surface)] px-3 py-1.5 text-sm hover:bg-[var(--color-surface-2)]",
+              busy && "opacity-50",
+            )}
+            title="Alle Klassen ohne Startlisten-Foto und ohne Ergebnisliste neu aus dem Meisterschaftsstand ableiten"
+          >
+            <RotateCcw className={cn("h-4 w-4", busy && "animate-spin")} />
+            Alle aus Meisterschaftsstand
+          </button>
+        )}
+      </div>
+      {groups.map((g) => (
+        <StartGridClassCard
+          key={g.ageClass}
+          event={event}
+          group={g}
+          onChange={onChange}
+          onError={onError}
+        />
+      ))}
+    </section>
+  );
+}
+
+function StartGridClassCard({
+  event,
+  group,
+  onChange,
+  onError,
+}: {
+  event: AdminEvent;
+  group: AdminGroup;
+  onChange: () => void;
+  onError: (m: string) => void;
+}) {
+  const [open, setOpen] = useState(false);
+  const [importing, setImporting] = useState(false);
+  const [busy, setBusy] = useState(false);
+  const hasResults = group.results.length > 0;
+  const hasStartList = group.startLists.length > 0;
+  const source = resolveStartOrderSource({
+    championship: event.championship,
+    eventNumber: event.number,
+    hasResults,
+    hasStartList,
+  });
+  const sorted = useMemo(() => sortByStart(group.entries), [group.entries]);
+  const duplicates = useMemo(() => duplicateStartingOrders(group.entries), [group.entries]);
+  const missing = group.entries.filter((e) => e.startingOrder === null).length;
+  const isUnderway = countRuns(group.entries) > 0;
+
+  const deleteStartLists = async () => {
+    if (
+      !confirm(
+        `Startlisten-Foto${group.startLists.length === 1 ? "" : "s"} der ${group.name} löschen?\n\nDie Startaufstellung wird danach wieder aus der Grundlage abgeleitet (${event.startOrder.baseLabel}).`,
+      )
+    )
+      return;
+    setBusy(true);
+    try {
+      const r = await apiCall(`/api/endlauf26/events/${event.id}/startlist`, {
+        method: "DELETE",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ ageClass: group.ageClass }),
+      });
+      if (!r.ok) onError(r.error);
+      onChange();
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  const deleteImage = async (img: EndlaufStartListMeta) => {
+    if (
+      !confirm(
+        "Dieses Foto löschen? Die daraus gelesenen Startplätze bleiben erhalten; ohne verbleibendes Foto folgt die Klasse beim nächsten Abgleich wieder der Grundlage.",
+      )
+    )
+      return;
+    setBusy(true);
+    try {
+      const r = await apiCall(`/api/endlauf26/startlist-images/${img.id}`, { method: "DELETE" });
+      if (!r.ok) onError(r.error);
+      onChange();
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  const syncClass = async () => {
+    if (
+      !confirm(
+        `Startaufstellung der ${group.name} neu aus dem Meisterschaftsstand ableiten?\n\n${event.startOrder.baseLabel}.${
+          isUnderway ? "\n\nAchtung: Die Klasse hat bereits Live-Zeiten." : ""
+        }`,
+      )
+    )
+      return;
+    setBusy(true);
+    try {
+      const r = await apiCall(`/api/endlauf26/events/${event.id}/start-order`, {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ ageClass: group.ageClass, force: true }),
+      });
+      if (!r.ok) onError(r.error);
+      onChange();
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  return (
+    <div
+      className={cn(
+        "rounded-lg border bg-[var(--color-surface)]",
+        hasStartList && !hasResults ? "border-[var(--color-accent)]/40" : "border-[var(--color-border)]",
+      )}
+    >
+      <div className="flex flex-wrap items-center justify-between gap-2 px-4 py-2">
+        <button
+          type="button"
+          onClick={() => setOpen((v) => !v)}
+          className="flex flex-wrap items-center gap-2 text-left"
+        >
+          <ChevronRight
+            className={cn("h-4 w-4 text-[var(--color-muted)] transition-transform", open && "rotate-90")}
+          />
+          <span className="text-sm font-semibold tracking-wider text-[var(--color-muted)] uppercase">
+            {group.name}
+          </span>
+          <span
+            className={cn(
+              "rounded-md px-2 py-0.5 text-xs font-semibold",
+              source === "startlist" && "bg-[var(--color-accent)]/15 text-[var(--color-accent)]",
+              source === "results" && "bg-[var(--color-rank-green)]/20 text-[var(--color-rank-green)]",
+              (source === "standings" || source === "csv") &&
+                "border border-[var(--color-border)] text-[var(--color-muted)]",
+            )}
+          >
+            {START_ORDER_SOURCE_LABEL[source]}
+          </span>
+          <span className="text-xs text-[var(--color-muted)]">{group.entries.length} Fahrer</span>
+          {group.startLists.length > 0 && (
+            <span className="inline-flex items-center gap-1 text-xs text-[var(--color-muted)]">
+              <ImageIcon className="h-3 w-3" /> {group.startLists.length} Foto
+              {group.startLists.length === 1 ? "" : "s"}
+            </span>
+          )}
+          {(duplicates.size > 0 || missing > 0) && (
+            <span className="inline-flex items-center gap-1 text-xs text-[var(--color-pending)]">
+              <AlertTriangle className="h-3 w-3" />
+              {duplicates.size > 0 && `${duplicates.size} Startplatz doppelt`}
+              {duplicates.size > 0 && missing > 0 && " · "}
+              {missing > 0 && `${missing} ohne Startplatz`}
+            </span>
+          )}
+        </button>
+        <div className="flex flex-wrap items-center gap-2">
+          {hasStartList && (
+            <button
+              type="button"
+              onClick={deleteStartLists}
+              disabled={busy}
+              className={cn(
+                "inline-flex items-center gap-1 rounded-md border border-red-500/40 px-2.5 py-1 text-xs text-red-400 hover:bg-red-500/10",
+                busy && "opacity-50",
+              )}
+            >
+              <Trash2 className="h-3.5 w-3.5" /> Startliste löschen
+            </button>
+          )}
+          {!hasStartList && !hasResults && event.startOrder.canSync && (
+            <button
+              type="button"
+              onClick={syncClass}
+              disabled={busy}
+              className={cn(
+                "inline-flex items-center gap-1 rounded-md border border-[var(--color-border)] px-2.5 py-1 text-xs hover:bg-[var(--color-surface-2)]",
+                busy && "opacity-50",
+              )}
+              title="Neu aus dem Meisterschaftsstand ableiten (überschreibt Handänderungen)"
+            >
+              <RotateCcw className="h-3.5 w-3.5" /> Aus Meisterschaftsstand
+            </button>
+          )}
+          <button
+            type="button"
+            onClick={() => {
+              setImporting((v) => !v);
+              setOpen(true);
+            }}
+            className={cn(
+              "inline-flex items-center gap-1 rounded-md px-2.5 py-1 text-xs font-medium",
+              importing
+                ? "border border-[var(--color-border)] text-[var(--color-muted)]"
+                : "bg-[var(--color-accent)] text-white hover:opacity-90",
+            )}
+          >
+            <Camera className="h-3.5 w-3.5" />
+            {importing ? "Einlesen schließen" : hasStartList ? "Weitere Startliste einlesen" : "Startliste einlesen"}
+          </button>
+        </div>
+      </div>
+
+      {open && (
+        <div className="space-y-3 border-t border-[var(--color-border)] p-3">
+          {importing && (
+            <EndlaufStartListImport
+              eventId={event.id}
+              ageClass={group.ageClass}
+              classLabel={group.name}
+              pool={group.pool}
+              current={group.entries.map((e) => ({ driverId: e.driverId, startingOrder: e.startingOrder }))}
+              onImported={() => {
+                setImporting(false);
+                onChange();
+              }}
+            />
+          )}
+
+          {hasResults && (
+            <p className="text-xs text-[var(--color-muted)]">
+              Für diese Klasse liegt die offizielle Ergebnisliste vor — die gedruckten Startplätze
+              stehen in der Ergebnistabelle. Die Reihenfolge hier ist nur noch für das Live-Timing
+              relevant.
+            </p>
+          )}
+
+          {group.startLists.length > 0 && (
+            <div className="flex flex-wrap gap-2">
+              {group.startLists.map((img) => (
+                <div
+                  key={img.id}
+                  className="relative overflow-hidden rounded-md border border-[var(--color-border)]"
+                >
+                  <a
+                    href={`/api/endlauf26/startlist-images/${img.id}`}
+                    target="_blank"
+                    rel="noopener"
+                    title={`Foto öffnen · ${formatDateDe(img.uploadedAt.slice(0, 10))} · ${img.rowCount} Startplätze${img.model ? ` · ${img.model}` : ""}`}
+                  >
+                    {/* eslint-disable-next-line @next/next/no-img-element */}
+                    <img
+                      src={`/api/endlauf26/startlist-images/${img.id}`}
+                      alt={`Startliste ${group.name}`}
+                      className="h-28 w-auto object-cover"
+                    />
+                  </a>
+                  <button
+                    type="button"
+                    onClick={() => deleteImage(img)}
+                    disabled={busy}
+                    title="Foto löschen"
+                    className="absolute top-1 right-1 rounded-md bg-black/60 p-1 text-white hover:bg-red-600"
+                  >
+                    <Trash2 className="h-3 w-3" />
+                  </button>
+                </div>
+              ))}
+            </div>
+          )}
+
+          <div className="overflow-x-auto">
+            <table className="w-full text-sm">
+              <thead className="text-xs tracking-wide text-[var(--color-muted)] uppercase">
+                <tr className="border-b border-[var(--color-border)]">
+                  <th className="px-2 py-2 text-left">
+                    <span className="inline-flex items-center gap-1">
+                      <ListOrdered className="h-3.5 w-3.5" /> Start
+                    </span>
+                  </th>
+                  <th className="px-3 py-2 text-left">Fahrer</th>
+                  <th className="px-3 py-2 text-left">Verein</th>
+                </tr>
+              </thead>
+              <tbody>
+                {sorted.map((e) => {
+                  const dup = e.startingOrder !== null && duplicates.has(e.startingOrder);
+                  return (
+                    <tr
+                      key={e.entryId}
+                      className={cn(
+                        "border-b border-[var(--color-border)]/50 last:border-0",
+                        dup && "bg-red-500/10",
+                      )}
+                      style={e.teamName === HOME_TEAM && !dup ? { backgroundColor: HOME_TEAM_BG } : undefined}
+                    >
+                      <td className="px-2 py-1.5">
+                        <StartingOrderInput entry={e} onSaved={onChange} />
+                      </td>
+                      <td className="px-3 py-1.5 font-medium">
+                        {e.lastName} {e.firstName}
+                        {e.nominated && (
+                          <span className="ml-2 rounded-sm bg-[var(--color-accent)]/15 px-1 py-0.5 text-[10px] font-semibold text-[var(--color-accent)] uppercase">
+                            Nachrücker
+                          </span>
+                        )}
+                      </td>
+                      <td className="px-3 py-1.5 text-[var(--color-muted)]">{e.teamName}</td>
+                    </tr>
+                  );
+                })}
+                {sorted.length === 0 && (
+                  <tr>
+                    <td colSpan={3} className="px-3 py-3 text-center text-sm text-[var(--color-muted)]">
+                      Keine Fahrer im Feld.
+                    </td>
+                  </tr>
+                )}
+              </tbody>
+            </table>
+          </div>
+        </div>
+      )}
     </div>
   );
 }

@@ -25,6 +25,7 @@ import {
 import { formatSeconds } from "@/lib/endlauf26/format";
 import { HOME_TEAM, HOME_TEAM_BG } from "@/lib/endlauf26/home-team";
 import type { EndlaufResultImageMeta, EndlaufResultRow } from "@/lib/endlauf26/results-types";
+import { StartGrid, type StartGridData } from "@/components/endlauf26/start-grid";
 import {
   stickyBodyBg,
   stickyDriverClass,
@@ -40,6 +41,7 @@ export function ClassResults({
   driverBasePath,
   isAdmin,
   adminHref,
+  startGrid,
 }: {
   ageClassName: string;
   rows: EndlaufResultRow[];
@@ -49,6 +51,8 @@ export function ClassResults({
   driverBasePath: string;
   isAdmin?: boolean;
   adminHref?: string;
+  /** Start grid of the class — shown while no result list exists. */
+  startGrid?: StartGridData;
 }) {
   const [mode, setMode] = useState<ScoringMode>("official");
   const [refDriver, setRefDriver] = useState<number | null>(null);
@@ -73,7 +77,7 @@ export function ClassResults({
             {ageClassName}
           </h3>
         </div>
-        <p className="px-4 py-4 text-sm text-[var(--color-muted)]">
+        <p className="px-4 py-3 text-sm text-[var(--color-muted)]">
           Noch keine offizielle Ergebnisliste eingelesen.
           {isAdmin && adminHref && (
             <>
@@ -84,6 +88,11 @@ export function ClassResults({
             </>
           )}
         </p>
+        {startGrid && startGrid.rows.length > 0 && (
+          <div className="border-t border-[var(--color-border)]">
+            <StartGrid data={startGrid} />
+          </div>
+        )}
       </div>
     );
   }

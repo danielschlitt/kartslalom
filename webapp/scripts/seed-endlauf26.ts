@@ -17,12 +17,16 @@
  *
  * Idempotent: teams/drivers/season results are upserted on their natural
  * keys; events are upserted by (championship, slug). hmj entries are only
- * inserted when missing (bottom-up starting order); ADAC entries take the
- * starting position of the CSV for every class that has no live times yet.
- * The admin flag `withdrawn` is never touched; `nominated` follows the CSV
- * for adac_hth and is left alone for hmj. Official results / photos
- * (`endlauf26_results`, `endlauf26_result_images`) are never touched. The
- * source documents are stored when the slot is still empty.
+ * inserted when missing (bottom-up starting order); ADAC entries of Endlauf 1
+ * take the starting position of the CSV for every class that has no live
+ * times yet. Afterwards the default start orders of every later Endlauf are
+ * re-derived from the championship standing (`syncStandingsStartOrders`) —
+ * classes with an official result list, a start list photo or live times
+ * are left alone. The admin flag `withdrawn` is never touched; `nominated`
+ * follows the CSV for adac_hth and is left alone for hmj. Official results /
+ * photos (`endlauf26_results`, `endlauf26_result_images`) and start list
+ * photos (`endlauf26_start_lists`) are never touched. The source documents
+ * are stored when the slot is still empty.
  *
  * Run:  cd webapp && npm run db:seed-endlauf26
  *       (or `make seed-endlauf26` from the project root)
@@ -47,6 +51,7 @@ import {
   type Endlauf26Championship,
   type EndlaufDriverInput,
 } from "../src/lib/endlauf26/ranking";
+import { syncStandingsStartOrders } from "../src/lib/endlauf26/start-order-sync";
 
 const __filename = fileURLToPath(import.meta.url);
 
@@ -413,9 +418,11 @@ async function pruneAdacField(keepIds: readonly number[]) {
 }
 
 /**
- * Entries of every ADAC Endlauf with the starting position of the CSV
- * (column 2 = Startplatz Endlauf 1). Applied to every event whose class has
- * no live times yet; a class already underway keeps its order.
+ * Entries of every ADAC Endlauf. Endlauf 1 takes the starting position of
+ * the CSV (column 2 = Startplatz Endlauf 1) for every class that has no live
+ * times yet; a class already underway keeps its order. Endlauf 2 and 3 only
+ * get their (missing) entries here — their order follows the championship
+ * standing, see `syncStartOrders`.
  */
 async function seedAdacEntries(drivers: AdacSeedResult["drivers"]) {
   const events = await db
@@ -448,15 +455,17 @@ async function seedAdacEntries(drivers: AdacSeedResult["drivers"]) {
   let reordered = 0;
   let skipped = 0;
   for (const ev of events) {
+    // Only Endlauf 1 starts in CSV order; later Endläufe follow the standing.
+    const csvOrder = ev.number === 1;
     for (const { entry, driverId } of drivers) {
-      const locked = underway.has(`${ev.id}:${entry.ageClass}`);
+      const locked = !csvOrder || underway.has(`${ev.id}:${entry.ageClass}`);
       const res = await db
         .insert(schema.endlauf26Entries)
         .values({
           eventId: ev.id,
           driverId,
           ageClass: entry.ageClass,
-          startingOrder: entry.startPosition,
+          startingOrder: csvOrder ? entry.startPosition : null,
         })
         .onConflictDoUpdate({
           target: [schema.endlauf26Entries.eventId, schema.endlauf26Entries.driverId],
@@ -469,12 +478,30 @@ async function seedAdacEntries(drivers: AdacSeedResult["drivers"]) {
           inserted: sql<boolean>`(xmax = 0)`,
         });
       if (res[0]?.inserted) inserted += 1;
+      else if (!csvOrder) continue;
       else if (locked) skipped += 1;
       else reordered += 1;
     }
   }
   console.log(
-    `  adac_hth: ${inserted} new entries, ${reordered} starting positions set from the CSV, ${skipped} kept (class underway) across ${events.length} events`,
+    `  adac_hth: ${inserted} new entries, ${reordered} starting positions of Endlauf 1 set from the CSV, ${skipped} kept (class underway) across ${events.length} events`,
+  );
+}
+
+/**
+ * Default start orders of every Endlauf from number 2 on: championship
+ * standing before the event, bottom-up. Classes with an official result
+ * list, a start list photo or live times are left alone.
+ */
+async function syncStartOrders(championship: Endlauf26Championship) {
+  const summary = await syncStandingsStartOrders(db, championship);
+  const changed = summary.classes.reduce((n, c) => n + c.changed, 0);
+  const skipped = summary.classes.filter((c) => c.skipped !== null);
+  const detail = skipped.length
+    ? ` (left alone: ${skipped.map((c) => `E${c.eventNumber} K${c.ageClass} [${c.skipped}]`).join(", ")})`
+    : "";
+  console.log(
+    `  ${championship}: ${changed} starting positions re-derived from the standing${detail}`,
   );
 }
 
@@ -710,6 +737,10 @@ async function seed() {
   console.log("Seeding entries…");
   await seedEntries("hmj");
   await seedAdacEntries(adacSeed.drivers);
+
+  console.log("Deriving start orders from the standings (Endlauf 2+)…");
+  await syncStartOrders("hmj");
+  await syncStartOrders("adac_hth");
 
   console.log("Storing source documents…");
   await seedDocuments();

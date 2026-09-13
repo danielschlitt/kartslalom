@@ -21,7 +21,7 @@ export function getVisionModel(): string {
  * `detail: "original"` (no resizing — best for OCR) exists from gpt-5.4 on;
  * older models only know low/high.
  */
-function detailFor(model: string): "original" | "high" {
+export function detailFor(model: string): "original" | "high" {
   const m = /^gpt-(\d+)(?:\.(\d+))?/.exec(model);
   if (!m) return "high";
   const major = Number(m[1]);

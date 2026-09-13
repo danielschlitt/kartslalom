@@ -227,6 +227,34 @@ export const endlauf26ResultImages = pgTable(
 );
 
 /**
+ * Photographs of the printed START LISTS (Startaufstellung) of an age class
+ * at one Endlauf — the same sheet as the result list, just without times.
+ * Reading one sets `endlauf26_entries.starting_order` of the listed drivers;
+ * while at least one photo exists for (event, class) the standings-based
+ * default order is never re-applied to that class. A class may span two
+ * photos. Deleting the photos restores the default order.
+ */
+export const endlauf26StartLists = pgTable(
+  "endlauf26_start_lists",
+  {
+    id: serial("id").primaryKey(),
+    eventId: integer("event_id")
+      .notNull()
+      .references(() => endlauf26Events.id, { onDelete: "cascade" }),
+    ageClass: integer("age_class").notNull(),
+    mime: text("mime").notNull(),
+    size: integer("size").notNull(),
+    data: bytea("data").notNull(),
+    /** Number of start positions taken from this photo. */
+    rowCount: integer("row_count").notNull().default(0),
+    /** Vision model that read the sheet (informational). */
+    model: text("model"),
+    uploadedAt: timestamp("uploaded_at").defaultNow().notNull(),
+  },
+  (t) => [index("endlauf26_start_lists_event_class_idx").on(t.eventId, t.ageClass)],
+);
+
+/**
  * OFFICIAL RESULTS — one row per (event, driver), read from the result list.
  * `position` is the single source of truth for the championship; the times
  * are stored for display, alternative scorings and plausibility checks.
@@ -368,8 +396,16 @@ export const endlauf26EventsRelations = relations(
     entries: many(endlauf26Entries),
     results: many(endlauf26Results),
     resultImages: many(endlauf26ResultImages),
+    startLists: many(endlauf26StartLists),
   }),
 );
+
+export const endlauf26StartListsRelations = relations(endlauf26StartLists, ({ one }) => ({
+  event: one(endlauf26Events, {
+    fields: [endlauf26StartLists.eventId],
+    references: [endlauf26Events.id],
+  }),
+}));
 
 export const endlauf26EntriesRelations = relations(
   endlauf26Entries,

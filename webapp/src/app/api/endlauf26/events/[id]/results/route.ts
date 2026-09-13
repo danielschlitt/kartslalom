@@ -26,6 +26,6 @@ export async function DELETE(
   const event = await getEndlaufEvent(eventId);
   if (!event) return NextResponse.json({ error: "not_found" }, { status: 404 });
 
-  const deleted = await deleteClassResults(eventId, ageClass);
+  const deleted = await deleteClassResults(event, ageClass);
   return NextResponse.json({ ok: true, ...deleted });
 }

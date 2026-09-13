@@ -4,11 +4,15 @@ import { Settings, Zap } from "lucide-react";
 import { ChampHeader } from "@/components/endlauf26/champ-header";
 import { ClassResults } from "@/components/endlauf26/class-results.client";
 import { EventStatusBadge } from "@/components/endlauf26/event-status-badge";
+import type { StartGridData } from "@/components/endlauf26/start-grid";
 import { isAdminSession } from "@/lib/admin-auth";
 import {
+  getEndlaufEntriesForEvent,
   getEndlaufEventBySlug,
+  getEndlaufEvents,
   getEndlaufResults,
   getResultImages,
+  getStartLists,
 } from "@/lib/dal/endlauf26";
 import { formatFactor } from "@/lib/endlauf26/format";
 import {
@@ -17,14 +21,16 @@ import {
   ENDLAUF26_AGE_CLASSES,
   ENDLAUF26_SLUGS,
 } from "@/lib/endlauf26/ranking";
+import { startOrderBaseLabel } from "@/lib/endlauf26/start-order";
 import { formatDateDe } from "@/lib/utils";
 
 export const dynamic = "force-dynamic";
 
 /**
  * Public results of one Endlauf: the imported official result list per age
- * class (source of truth) with the alternative scorings on top. Live timing
- * lives on its own page and is only linked while the event is live.
+ * class (source of truth) with the alternative scorings on top. Classes
+ * without a result list show their start grid instead. Live timing lives on
+ * its own page and is only linked while the event is live.
  */
 export default async function EndlaufEventPage({
   params,
@@ -37,14 +43,36 @@ export default async function EndlaufEventPage({
   const event = await getEndlaufEventBySlug(championship, slug);
   if (!event) notFound();
 
-  const [results, images, isAdmin] = await Promise.all([
+  const [results, images, entries, startLists, events, isAdmin] = await Promise.all([
     getEndlaufResults(event.id),
     getResultImages(event.id),
+    getEndlaufEntriesForEvent(event.id),
+    getStartLists(event.id),
+    getEndlaufEvents(championship),
     isAdminSession(),
   ]);
   const scoredClasses = new Set(results.map((r) => r.ageClass));
   const base = `/endlauf26/${ENDLAUF26_SLUGS[championship]}`;
   const adminHref = `${base}/admin/events/${event.slug}`;
+  const baseLabel = startOrderBaseLabel(championship, event, events);
+
+  const startGridFor = (ageClass: number): StartGridData => {
+    const classImages = startLists.filter((s) => s.ageClass === ageClass);
+    return {
+      rows: entries
+        .filter((e) => e.ageClass === ageClass)
+        .map((e) => ({
+          driverId: e.driverId,
+          firstName: e.firstName,
+          lastName: e.lastName,
+          teamName: e.teamName,
+          startingOrder: e.startingOrder,
+          nominated: e.nominated,
+        })),
+      images: classImages,
+      sourceLabel: classImages.length > 0 ? "laut ausgehängter Startliste" : baseLabel,
+    };
+  };
 
   return (
     <div className="space-y-6">
@@ -77,7 +105,7 @@ export default async function EndlaufEventPage({
             href={adminHref}
             className="inline-flex items-center gap-1 text-[var(--color-muted)] hover:text-[var(--color-foreground)]"
           >
-            <Settings className="h-3.5 w-3.5" /> Ergebnislisten einlesen
+            <Settings className="h-3.5 w-3.5" /> Ergebnislisten / Startlisten einlesen
           </Link>
         )}
       </div>
@@ -85,7 +113,8 @@ export default async function EndlaufEventPage({
       <p className="text-xs text-[var(--color-muted)]">
         Platz und Punkte stammen aus der fotografierten offiziellen Ergebnisliste je Klasse. Die
         Ansichten „Nur schnellste Runde“ (ohne und mit Fehlern), „Ohne Fehler“ und „Nur Fehler“ sind Was-wäre-wenn-Wertungen
-        und ändern nichts an der offiziellen Reihenfolge.
+        und ändern nichts an der offiziellen Reihenfolge. Klassen ohne Ergebnisliste zeigen ihre
+        Startaufstellung ({baseLabel}; vor Ort ausgehängte Startlisten gehen vor).
       </p>
 
       {ENDLAUF26_AGE_CLASSES.map((c) => (
@@ -98,6 +127,7 @@ export default async function EndlaufEventPage({
           driverBasePath={`${base}/driver`}
           isAdmin={isAdmin}
           adminHref={adminHref}
+          startGrid={startGridFor(c)}
         />
       ))}
     </div>

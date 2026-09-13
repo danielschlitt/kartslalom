@@ -82,8 +82,9 @@ Separate data set under `/endlauf26/{hmj,adac-hth}`, seeded by `make seed-endlau
   The regional position is scored like one race via the points table (several
   drivers may carry the same position), column 7 = `Nachrücker` flags a
   replacement driver (badge *Nachrücker*, scored like everybody else), column 2
-  becomes the live start order of all three Endläufe (for classes without live
-  times). Club spellings are normalised to the names already in the database
+  becomes the live start order of **Endlauf 1** (for classes without live
+  times) — Endlauf 2 and 3 start in championship order, see *Startaufstellung*
+  below. Club spellings are normalised to the names already in the database
   (`CLUB_ALIASES` in `lib/endlauf26/adac-field.ts`) so one club stays one team.
   Drivers of earlier imports that are not on the list are **deleted** by the
   seed (unless an official result exists for them — then they are kept and
@@ -99,14 +100,48 @@ to all Endläufe of the championship (announce them before the first Endlauf):
   in the championship table (badge *abgemeldet*, season points still visible) but
   unranked at the bottom of his class. Reversible.
 - **Nachnominieren** — pick a non-qualified driver of the same class from the
-  list; he is entered in every Endlauf, starts first in classes that have not
-  begun yet (worst pre-Endlauf standing starts first) and scores like a
+  list; he is entered in every Endlauf, is placed in the start grid according
+  to the standing (classes with a start list photo: first) and scores like a
   qualified driver (badge *Nachrücker*). Reversible while no result is stored.
   Usually not needed by hand: a driver who appears on an imported result list
   without being green in the PDF becomes a Nachrücker automatically.
 
 A driver who is listed but does not appear on the result list needs no action:
 he gets no position and 0 points for that Endlauf (ADAC: *n. g.* in the table).
+
+### Startaufstellung (start grid)
+
+The live start order of every class (`endlauf26_entries.starting_order`,
+shown on the event page until the result list is imported, on the live board
+and in the admin) has one default rule: **the championship standing before
+the Endlauf, bottom-up** — the driver ranked last starts first, the leader
+last (`lib/endlauf26/start-order.ts`). Endlauf 1 uses the standing after the
+regular season (hmj) or, for ADAC, the start positions of the CSV; Endlauf n
+uses the standing after Endlauf n−1, i.e. the current championship table.
+That default is re-derived automatically whenever the standing can change
+(result list imported / deleted, Endlauf reset, Abmeldung / Nachnominierung)
+and by the seed (`lib/endlauf26/start-order-sync.ts`), so Reinheim follows
+the table after Crumbach and Malsfeld the table after Reinheim.
+
+On location the organiser posts a start list per class (the result list
+without times) that may differ. On `/endlauf26/[champ]/admin/events/[slug]`
+→ **Startaufstellung**, every class has **"Startliste einlesen"**: photograph
+the posted list, the vision model (`OPENAI_VISION_MODEL`) reads the rows in
+printed order (Startplatz, Name, Ortsclub, Ausweis-Nr.), every row is matched
+to a driver of the class pool and reviewed — Startplatz editable, one click
+numbers the rows 1…n when the sheet has no number column — and
+**"Startaufstellung übernehmen"** stores the photo (`endlauf26_start_lists`,
+`POST /api/endlauf26/events/[id]/startlist/ocr` → `POST …/startlist`) and sets
+the start order of the listed drivers (rows of other drivers stay, so a
+two-page class is read as two photos; drivers outside the field become
+Nachrücker). While a photo exists for a class, the default rule no longer
+touches it. **"Startliste löschen"** (`DELETE …/startlist`) removes the photos
+and immediately restores the default order; **"Aus Meisterschaftsstand"**
+(`POST …/start-order`) recomputes it on demand (per class or for the whole
+Endlauf, also over hand-edited numbers). Single positions can still be edited
+by hand in the table; the public event page links the photo
+(`/api/endlauf26/startlist-images/[id]`). Classes with an official result list
+are left alone — their printed Startplatz lives in the result table.
 
 ### Official results: photo of the result list → championship
 
@@ -135,8 +170,8 @@ new photo, **"Liste löschen"** removes the class result (`DELETE …/results`),
 stored photos can be opened and deleted individually
 (`/api/endlauf26/result-images/[id]`). **"Endlauf zurücksetzen"** (bottom of
 the event admin, confirm with the event slug — `POST …/reset`) deletes all
-results, photos and live times of one Endlauf to start from scratch; field and
-start orders stay.
+results, photos and live times of one Endlauf to start from scratch; field,
+start orders and start list photos stay.
 
 Public event pages (`/endlauf26/[champ]/events/[slug]`) show the imported list
 per class plus alternative "what if" scorings — **Nur schnellste Runde**
